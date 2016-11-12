@@ -61,12 +61,18 @@ typedef struct {
 	  double specular_color[3];
       double position[3];
       double radius;
+	  double reflectivity;
+	  double refractivity;
+	  double ior;
     } sphere;
     struct {
 	  double diffuse_color[3];
 	  double specular_color[3];
 	  double position[3];
 	  double normal[3];
+	  double reflectivity;
+	  double refractivity;
+	  double ior;
     } plane;
     struct {
 	  int kind_light; // 0 = point light, 1 = spot light
@@ -245,6 +251,12 @@ void read_scene(char* filename)
 	  int light_rad0_read = 0;
 	  int light_ang0_read = 0;
 	  int light_theta_read = 0;
+	  int sphere_reflectivity_read = 0;
+	  int sphere_refractivity_read = 0;
+	  int sphere_ior_read = 0;
+	  int plane_reflectivity_read = 0;
+	  int plane_refractivity_read = 0;
+	  int plane_ior_read = 0;
 	  
       skip_ws(json);
     
@@ -319,17 +331,17 @@ void read_scene(char* filename)
 		}
 		else if(objects[i]->kind == 1)
 		{
-			if(sphere_diff_color_read != 1 ||  sphere_spec_color_read != 1 ||  sphere_position_read != 1 || sphere_radius_read != 1)
+			if(sphere_diff_color_read != 1 ||  sphere_spec_color_read != 1 ||  sphere_position_read != 1 || sphere_radius_read != 1 || sphere_reflectivity_read != 1 || sphere_refractivity_read != 1 || sphere_ior_read != 1)
 			{
-				fprintf(stderr, "Error: Object #%d (0-indexed) is a sphere which should have four unique fields: diffuse_color/specular_color/position/radius\n", i);
+				fprintf(stderr, "Error: Object #%d (0-indexed) is a sphere which should have seven unique fields: diffuse_color/specular_color/position/radius/reflectivity/refractivity/ior\n", i);
 				exit(1);
 			}
 		}
 		else if(objects[i]->kind == 2)
 		{
-			if(plane_diff_color_read != 1 ||  plane_spec_color_read != 1 || plane_position_read != 1 || plane_normal_read != 1)
+			if(plane_diff_color_read != 1 ||  plane_spec_color_read != 1 || plane_position_read != 1 || plane_normal_read != 1 || plane_reflectivity_read != 1 || plane_refractivity_read != 1 || plane_ior_read != 1)
 			{
-				fprintf(stderr, "Error: Object #%d (0-indexed) is a plane which should have four unique fields: diffuse_color/specular_color/position/normal\n", i);
+				fprintf(stderr, "Error: Object #%d (0-indexed) is a plane which should have seven unique fields: diffuse_color/specular_color/position/normal/reflectivity/refractivity/ior\n", i);
 				exit(1);
 			}
 		}
@@ -396,6 +408,12 @@ void read_scene(char* filename)
 		int light_rad0_read = 0;
 		int light_ang0_read = 0;
 		int light_theta_read = 0;
+		int sphere_reflectivity_read = 0;
+		int sphere_refractivity_read = 0;
+		int sphere_ior_read = 0;
+		int plane_reflectivity_read = 0;
+		int plane_refractivity_read = 0;
+		int plane_ior_read = 0;
 	    break;
 	  } 
 	  else if (c == ',') 
@@ -413,7 +431,10 @@ void read_scene(char* filename)
 	      (strcmp(key, "radial-a1") == 0) ||
 		  (strcmp(key, "radial-a0") == 0) ||
 		  (strcmp(key, "angular-a0") == 0) ||
-		  (strcmp(key, "theta") == 0))
+		  (strcmp(key, "theta") == 0) ||
+		  (strcmp(key, "reflectivity") == 0) ||
+		  (strcmp(key, "refractivity") == 0) ||
+		  (strcmp(key, "ior") == 0))
 	  {
 	    double value = next_number(json);
 		if(strcmp(key, "width") == 0 && objects[i]->kind == 0) // evaluates only if key is width and current object is a camera
@@ -488,10 +509,54 @@ void read_scene(char* filename)
 			}
 			objects[i]->light.theta = value;
 			light_theta_read++; // increments error checking variable for theta field being read
-		}			
+		}
+		else if((strcmp(key, "reflectivity") == 0 && objects[i]->kind == 1) || (strcmp(key, "reflectivity") == 0 && objects[i]->kind == 2)) // evaluates only if key is reflectivity and current object is a sphere or plane
+		{
+			if(objects[i]->kind == 1)
+			{
+				objects[i]->sphere.reflectivity = value;
+				sphere_reflectivity_read++;
+			}
+			else
+			{
+				objects[i]->plane.reflectivity = value;
+				plane_reflectivity_read++;
+			}
+		}	
+		else if((strcmp(key, "refractivity") == 0 && objects[i]->kind == 1) || (strcmp(key, "refractivity") == 0 && objects[i]->kind == 2)) // evaluates only if key is refractivity and current object is a sphere or plane
+		{
+			if(objects[i]->kind == 1)
+			{
+				objects[i]->sphere.refractivity = value;
+				sphere_refractivity_read++;
+			}
+			else
+			{
+				objects[i]->plane.reflectivity = value;
+				plane_refractivity_read++;
+			}
+		}	
+		else if((strcmp(key, "ior") == 0 && objects[i]->kind == 1) || (strcmp(key, "ior") == 0 && objects[i]->kind == 2)) // evaluates only if key is ior and current object is a sphere or plane
+		{
+			if(objects[i]->kind == 1)
+			{
+				objects[i]->sphere.ior = value;
+				sphere_ior_read++;
+			}
+			else
+			{
+				objects[i]->plane.ior = value;
+				plane_ior_read++;
+			}
+		}	
+
+		
+		// 	DO ERROR CHECKING ON REFLECTIVITY/REFRACTIVITY/IOR VALUES. CHECK IF REFLECTIVITY + REFRACTIVITY > 1? AND PROMPT ERROR IF SO
+		
+		
 		else // after key was identified as width/height/radius/radial-a2/radial-a1/radial-a0/angular-a0/theta, object type is unknown so display an error
 		{
-			fprintf(stderr, "Error: Only cameras should have width/height, spheres have radius, and lights have radial-a2/radial-a1/radial-a0/angular-a0/theta. Violation found on line number %d.\n", line);
+			fprintf(stderr, "Error: Only cameras should have width/height, spheres have radius, spheres and planes have reflectivity/refractivity/ior, and lights have radial-a2/radial-a1/radial-a0/angular-a0/theta. Violation found on line number %d.\n", line);
             exit(1);
 		}
 		
