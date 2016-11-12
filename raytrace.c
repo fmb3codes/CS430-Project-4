@@ -94,6 +94,11 @@ double frad(Object* light, double dl); // performs radial attenuation
 double fang(Object* light, double direction[3], double theta); // performs angular attenuation
 
 
+
+/////////////
+void print_objects(Object** objects); // testing helper function
+
+
 // header_data buffer which is intended to contain all relevant header information of ppm file
 typedef struct header_data 
 {
@@ -514,11 +519,21 @@ void read_scene(char* filename)
 		{
 			if(objects[i]->kind == 1)
 			{
+				if(value < 0 || value > 1) // error check to make sure reflectivity is between 0 and 1
+				{
+					fprintf(stderr, "Error: reflectivity must be between 0 and 1. Violation found on line number %d.\n", line);
+					exit(1);
+				}
 				objects[i]->sphere.reflectivity = value;
 				sphere_reflectivity_read++;
 			}
 			else
 			{
+				if(value < 0 || value > 1) // error check to make sure reflectivity is between 0 and 1
+				{
+					fprintf(stderr, "Error: reflectivity must be between 0 and 1. Violation found on line number %d.\n", line);
+					exit(1);
+				}
 				objects[i]->plane.reflectivity = value;
 				plane_reflectivity_read++;
 			}
@@ -527,12 +542,22 @@ void read_scene(char* filename)
 		{
 			if(objects[i]->kind == 1)
 			{
+				if(value < 0 || value > 1) // error check to make sure refractivity is between 0 and 1
+				{
+					fprintf(stderr, "Error: refractivity must be between 0 and 1. Violation found on line number %d.\n", line);
+					exit(1);
+				}
 				objects[i]->sphere.refractivity = value;
 				sphere_refractivity_read++;
 			}
 			else
 			{
-				objects[i]->plane.reflectivity = value;
+				if(value < 0 || value > 1) // error check to make sure refractivity is between 0 and 1
+				{
+					fprintf(stderr, "Error: refractivity must be between 0 and 1. Violation found on line number %d.\n", line);
+					exit(1);
+				}
+				objects[i]->plane.refractivity = value;
 				plane_refractivity_read++;
 			}
 		}	
@@ -551,7 +576,7 @@ void read_scene(char* filename)
 		}	
 
 		
-		// 	DO ERROR CHECKING ON REFLECTIVITY/REFRACTIVITY/IOR VALUES. CHECK IF REFLECTIVITY + REFRACTIVITY > 1? AND PROMPT ERROR IF SO
+		// 	DO ERROR CHECKING ON REFLECTIVITY/REFRACTIVITY/IOR VALUES. CHECK IF REFLECTIVITY + REFRACTIVITY > 1? AND PROMPT ERROR IF SO. DON'T FORGET THIS LAST PART
 		
 		
 		else // after key was identified as width/height/radius/radial-a2/radial-a1/radial-a0/angular-a0/theta, object type is unknown so display an error
@@ -1275,4 +1300,69 @@ void specular_calculation(double n[3], double l[3], double il[3], double ks[3], 
         output[1] = 0;
         output[2] = 0;
     }
+}
+
+// helper function
+void print_objects(Object** objects)
+{
+	int i = 0;
+	while(objects[i] != NULL)
+	{
+			if(objects[i]->kind == 0)
+			{
+				printf("#%d object is a camera\n", i);
+				printf("Camera width is: %lf\n", objects[i]->camera.width);
+				printf("Camera height is: %lf\n", objects[i]->camera.height);
+				printf("-------------------------------------------------------\n");
+				i++;
+			}
+			else if(objects[i]->kind == 1)
+			{
+				printf("#%d object is a sphere\n", i);
+				printf("Sphere diffuse color is: [%lf, %lf, %lf]\n", objects[i]->sphere.diffuse_color[0], objects[i]->sphere.diffuse_color[1], objects[i]->sphere.diffuse_color[2]);
+				printf("Sphere specular color is: [%lf, %lf, %lf]\n", objects[i]->sphere.specular_color[0], objects[i]->sphere.specular_color[1], objects[i]->sphere.specular_color[2]);
+				printf("Sphere position is: [%lf, %lf, %lf]\n", objects[i]->sphere.position[0], objects[i]->sphere.position[1], objects[i]->sphere.position[2]);
+				printf("Sphere radius is: %lf\n", objects[i]->sphere.radius);
+				printf("Sphere reflectivity is: %lf\n", objects[i]->sphere.reflectivity);
+				printf("Sphere refractivity is: %lf\n", objects[i]->sphere.refractivity);
+				printf("Sphere ior is: %lf\n", objects[i]->sphere.ior);
+				printf("-------------------------------------------------------\n");
+				i++;
+			}
+			else if(objects[i]->kind == 2)
+			{
+				printf("#%d object is a plane\n", i);
+				printf("Plane diffuse color is: [%lf, %lf, %lf]\n", objects[i]->plane.diffuse_color[0], objects[i]->plane.diffuse_color[1], objects[i]->plane.diffuse_color[2]);
+				printf("Plane specular color is: [%lf, %lf, %lf]\n", objects[i]->plane.specular_color[0], objects[i]->plane.specular_color[1], objects[i]->plane.specular_color[2]);
+				printf("Plane position is: [%lf, %lf, %lf]\n", objects[i]->plane.position[0], objects[i]->plane.position[1], objects[i]->plane.position[2]);
+				printf("Plane normal is: [%lf, %lf, %lf]\n", objects[i]->plane.normal[0], objects[i]->plane.normal[1], objects[i]->plane.normal[2]);
+				printf("Plane reflectivity is: %lf\n", objects[i]->plane.reflectivity);
+				printf("Plane refractivity is: %lf\n", objects[i]->plane.refractivity);
+				printf("Plane ior is: %lf\n", objects[i]->plane.ior);
+				printf("-------------------------------------------------------\n");
+				i++;
+			}
+			else if(objects[i]->kind == 3)
+			{
+				if(objects[i]->light.kind_light == 0)
+					printf("#%d object is a point light\n", i);
+				else if(objects[i]->light.kind_light == 1)
+					printf("#%d object is a spot light\n", i);
+				printf("Light color is: [%lf, %lf, %lf]\n", objects[i]->light.color[0], objects[i]->light.color[1], objects[i]->light.color[2]);
+				printf("Light position is: [%lf, %lf, %lf]\n", objects[i]->light.position[0], objects[i]->light.position[1], objects[i]->light.position[2]);
+				printf("Light direction is: [%lf, %lf, %lf]\n", objects[i]->light.direction[0], objects[i]->light.direction[1], objects[i]->light.direction[2]);
+				printf("Light radial-a2 is: %lf\n", objects[i]->light.radial_a2);
+				printf("Light radial-a1 is: %lf\n", objects[i]->light.radial_a1);
+				printf("Light radial-a0 is: %lf\n", objects[i]->light.radial_a0);
+				printf("Light angular-a0 is: %lf\n", objects[i]->light.angular_a0);
+				printf("Light theta is: %lf\n", objects[i]->light.theta);
+				printf("-------------------------------------------------------\n");
+				i++;
+			}
+			else
+			{
+				fprintf(stderr, "Error: Unrecognized object.\n");
+				exit(1);
+			}
+	}
 }
