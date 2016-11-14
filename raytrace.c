@@ -97,7 +97,7 @@ void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to
 
 void shade(double Rd[3], double Ro[3], double best_t, int best_i, Object** lights, int depth, double* color);
 
-
+void shoot(double Ro[3], double Rd[3], double distance, int current_index, double* final_distance, int* final_index);
 
 /////////////
 void print_objects(Object** objects); // testing helper function
@@ -814,62 +814,34 @@ void raycasting()
 				
 				double color[3] = {0, 0, 0};
 
-					double best_t = INFINITY;
-					int best_i = 0;
-					//double t = 0;
-					for (int i=0; objects[i] != 0; i += 1) { // iterates through objects
-						double t = 0; // sets t value to 0 before evaluating objects
-
-						switch(objects[i]->kind) { // switch statement used to check object type and intersection information accordingly
-						case 0: // object is a camera so break
-							break; 
-						case 1: // object is a sphere so calculate sphere intersection
-							t = sphere_intersection(Ro, Rd,
-														objects[i]->sphere.position,
-														objects[i]->sphere.radius);	
-							
-							break;
-						case 2: // object is a plane so calculate plane intersection
-							t = plane_intersection(Ro, Rd,
-														objects[i]->plane.position,
-														objects[i]->plane.normal);
-														
-							break;
-						case 3: // object is a light so break
-							break; 
-						default:
-							fprintf(stderr, "Error: Unrecognized object.\n"); // Error in case siwtch doesn't evaluate as a known object but should never happen
-							exit(1);
-						}
-						if (t > 0 && t < best_t) // stores best_t if there's a dominant intersection. Also stores best_i to record current object index
-						{
-							best_t = t; 
-							best_i = i;
-						}
-					}
+				double best_t = INFINITY;
+				int best_i = -1;
+				shoot(Ro, Rd, INFINITY, -1, &best_t, &best_i); 
+				//double t = 0;
 					
-					if (best_t > 0 && best_t != INFINITY) {
-						//printf("Color values before shade are [%lf %lf %lf]\n", color[0], color[1], color[2]);
-						shade(Rd, Ro, best_t, best_i, lights, 0, color);
-						//printf("Color values after shade are [%lf %lf %lf]\n", color[0], color[1], color[2]);
-						
-						current_pixel.r = (unsigned char)(255 * clamp(color[0]));
-						current_pixel.g = (unsigned char)(255 * clamp(color[1])); // sets current pixel's color values based on calculated colors in color vector (clamped)
-						current_pixel.b = (unsigned char)(255 * clamp(color[2]));
-						*temp_ptr = current_pixel; // sets current image_data struct in temp_ptr to current_pixel colored from object 
-						temp_ptr++; // increments temp_ptr to point to next image_data struct in global buffer
-						
-						current_pixel.r = 0;
-						current_pixel.g = 0; // resets current pixel RGB values to 0 after coloring current pixel
-						current_pixel.b = 0;
-					}
-					else { // no dominant intersection found at current point so pixel is to be colored black
-						current_pixel.r = (unsigned char)(255 * clamp(color[0]));
-						current_pixel.g = (unsigned char)(255 * clamp(color[1])); // should all be 0 
-						current_pixel.b = (unsigned char)(255 * clamp(color[2]));		
-						*temp_ptr = current_pixel;  // sets current image_data struct in temp_ptr to current_pixel colored from object 
-						temp_ptr++; // increments temp_ptr to point to next image_data struct in global buffer
-					}
+					
+				if (best_t > 0 && best_t != INFINITY) { // add && best_i != -1?
+					//printf("Color values before shade are [%lf %lf %lf]\n", color[0], color[1], color[2]);
+					shade(Rd, Ro, best_t, best_i, lights, 0, color);
+					//printf("Color values after shade are [%lf %lf %lf]\n", color[0], color[1], color[2]);
+					
+					current_pixel.r = (unsigned char)(255 * clamp(color[0]));
+					current_pixel.g = (unsigned char)(255 * clamp(color[1])); // sets current pixel's color values based on calculated colors in color vector (clamped)
+					current_pixel.b = (unsigned char)(255 * clamp(color[2]));
+					*temp_ptr = current_pixel; // sets current image_data struct in temp_ptr to current_pixel colored from object 
+					temp_ptr++; // increments temp_ptr to point to next image_data struct in global buffer
+					
+					current_pixel.r = 0;
+					current_pixel.g = 0; // resets current pixel RGB values to 0 after coloring current pixel
+					current_pixel.b = 0;
+				}
+				else { // no dominant intersection found at current point so pixel is to be colored black
+					current_pixel.r = (unsigned char)(255 * clamp(color[0]));
+					current_pixel.g = (unsigned char)(255 * clamp(color[1])); // should all be 0 
+					current_pixel.b = (unsigned char)(255 * clamp(color[2]));		
+					*temp_ptr = current_pixel;  // sets current image_data struct in temp_ptr to current_pixel colored from object 
+					temp_ptr++; // increments temp_ptr to point to next image_data struct in global buffer
+				}
 			}
 		}	
 		return;
@@ -1228,6 +1200,7 @@ void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to
 	double nv[3];
 	double diffuse[3] = {0, 0, 0};
 	double specular[3] = {0, 0, 0};
+	double object_direction[3];
 	
 	if(objects[best_i]->kind == 1) // determine some necessary variables according to sphere fields
 	{									
@@ -1265,7 +1238,6 @@ void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to
 		// passes in corresponding variables for diffuse and specular calculators, using the diffuse/specular vectors as output
 		diffuse_calculation(n, l, light->light.color, objects[best_i]->sphere.diffuse_color, diffuse);
 		specular_calculation(n, l, light->light.color, objects[best_i]->sphere.specular_color, nv, r, 20, specular);
-																		
 	}
 	else if(objects[best_i]->kind == 2) // determine some necessary variables according to plane fields
 	{									
@@ -1305,10 +1277,8 @@ void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to
 		diffuse_calculation(n, l, light->light.color, objects[best_i]->plane.diffuse_color, diffuse);
 		specular_calculation(n, l, light->light.color, objects[best_i]->plane.specular_color, nv, r, 20, specular);																
 	}		
-		// initializes object_direction (from object to light) vector
-		double object_direction[3];
 		object_direction[0] = Rdn[0] * -1;
-		object_direction[1] = Rdn[1] * -1;
+		object_direction[1] = Rdn[1] * -1; 
 		object_direction[2] = Rdn[2] * -1;
 		normalize(object_direction);
 		
@@ -1317,12 +1287,14 @@ void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to
 		
 		if(light->light.kind_light == 3)
 		{
+			printf("Checking a reflection off an object (kind_light = 3)\n");
 			fang_val = 1;
 			frad_val = 1;
 		}
 		
 		if(light->light.kind_light != 3) // maybe change this if statement
 		{
+			printf("Non-reflection of an object so do fang/frad attenuation (kind_light != 3)\n");
 			fang_val = fang(light, object_direction, light->light.theta);									
 			frad_val = frad(light, distance_to_light);
 		}
@@ -1342,7 +1314,7 @@ void shade(double Rd[3], double Ro[3], double best_t, int best_i, Object** light
 		color[2] = 0;
 		return;
 	}
-	
+		
 	double Ron[3] = {0, 0, 0}; // Initializes new origin ray to the assumed 0, 0, 0 position
 	double Rdn[3] = {0, 0, 0}; // Initializes new direction of ray to 0, 0, 0 which will be changed
 	
@@ -1369,7 +1341,9 @@ void shade(double Rd[3], double Ro[3], double best_t, int best_i, Object** light
 		Ref_normal[1] = objects[best_i]->plane.normal[1];
 		Ref_normal[2] = objects[best_i]->plane.normal[2];
 	}
+	
 	normalize(Ref_normal);
+	normalize(Rd);
 	
 	// calculating reflection variable
 	double temp_scalar = 2.0 * ((Ref_normal[0]*Rd[0]) + (Ref_normal[1]*Rd[1]) + (Ref_normal[2]*Rd[2]));
@@ -1377,9 +1351,17 @@ void shade(double Rd[3], double Ro[3], double best_t, int best_i, Object** light
 	temp_vector[0] = Ref_normal[0] * temp_scalar;
 	temp_vector[1] = Ref_normal[1] * temp_scalar;
 	temp_vector[2] = Ref_normal[2] * temp_scalar;	
+	
+	// method 1 (also in shade_object function)
 	Ref[0] = temp_vector[0] - Rd[0];
 	Ref[1] = temp_vector[1] - Rd[1];
-	Ref[2] = temp_vector[2] - Rd[2];					
+	Ref[2] = temp_vector[2] - Rd[2];
+
+	// method 2
+	/*
+	Ref[0] = Rd[0] - temp_vector[0];
+	Ref[1] = Rd[1] - temp_vector[1];
+	Ref[2] = Rd[2] - temp_vector[2];*/
 	// end of calculating reflection variable
 	
 	// check for wrong object type? shouldn't have to
@@ -1390,9 +1372,10 @@ void shade(double Rd[3], double Ro[3], double best_t, int best_i, Object** light
 	
 	// shoot out reflection vector
 	double best_r = INFINITY;
-	int best_o = 0;
+	int best_o = -1;
 	for(int i = 0; objects[i] != 0; i+=1) // iterates through objects
 	{
+		// do we need this?
 		if(objects[best_i] == objects[i]) // checks to make sure that the object checked isn't the previously calculated closest object
 			continue;
 		double r_t = 0;  // sets t value to 0 before evaluating objects
@@ -1429,75 +1412,89 @@ void shade(double Rd[3], double Ro[3], double best_t, int best_i, Object** light
 		}
 	}
 	
-	if(best_r == INFINITY)
+	if(best_o == -1) // change this?
 	{
 		color[0] = 0;
 		color[1] = 0;
 		color[2] = 0;
 	}
-	if(best_r != INFINITY) // may need to adjust this if statement
+	if(best_o != -1) // may need to adjust this if statement
 	{
 		double Ref_color[3] = {0, 0, 0};
 		double Rd_r[3] = {0, 0, 0};
 		double reflectivity = 0;
+		double reflect_ior = 0; // put this in if statement eventually
 		
 		if(objects[best_i]->kind == 1)
 		{
 			reflectivity = objects[best_i]->sphere.reflectivity;
+			reflect_ior = objects[best_o]->sphere.ior; // best_o here because it's the ior of the object reflected off of?
 		}
 		if(objects[best_i]->kind == 2)
 		{
 			reflectivity = objects[best_i]->plane.reflectivity;
+			reflect_ior = objects[best_o]->plane.ior;
 		}
+		
 		
 		/*
 		Rd_r[0] = (Rd[0] + best_r) * Ref; // should it be Rd_r or Ro_r?
 		Rd_r[1] = (Rd[1] + best_r) * Ref; // maybe add back and use as first param in shade call below
 		Rd_r[2] = (Rd[2] + best_r) * Ref;*/
 		
-		shade(Ref, Ron, best_r, best_o, lights, depth + 1, Ref_color);
+		//shade(Ref, Ron, best_r, best_o, lights, depth + 1, Ref_color);
 		
-		Ref_color[0] *= reflectivity;
-		Ref_color[1] *= reflectivity;
-		Ref_color[2] *= reflectivity;
+		//Ref_color[0] *= reflectivity;
+		//Ref_color[1] *= reflectivity;
+		//Ref_color[2] *= reflectivity;
 		
 		
-		//invert reflection vector?
+		/*//invert reflection vector?
 		Ref[0] *= -1;
 		Ref[1] *= -1;
-		Ref[2] *= -1;
+		Ref[2] *= -1;*/
 		
 		// create reflection light object
 		Object* Ref_light;
-		Ref_light = (Object *)malloc(sizeof(Object));
+		Ref_light = (Object*)malloc(sizeof(Object));
 		
 		Ref_light->light.kind_light = 3;
+	
+		// done filling temp light object
 		
-		Ref_light->light.direction[0] = Ref[0];
-		Ref_light->light.direction[1] = Ref[1];
-		Ref_light->light.direction[2] = Ref[2];
+		
+		printf("Temp light direction is: [%lf %lf %lf]\n", Ref_light->light.direction[0], Ref_light->light.direction[1], Ref_light->light.direction[2]);
+		printf("Temp light color is: [%lf %lf %lf]\n", Ref_light->light.color[0], Ref_light->light.color[1], Ref_light->light.color[2]);
+		shade(Ref, Ron, best_r, best_o, lights, depth + 1, Ref_color);
+		
+		Ref_light->light.direction[0] = Ref[0] * -1;
+		Ref_light->light.direction[1] = Ref[1] * -1;
+		Ref_light->light.direction[2] = Ref[2] * -1;
 		
 		Ref_light->light.color[0] = Ref_color[0];
 		Ref_light->light.color[1] = Ref_color[1];
 		Ref_light->light.color[2] = Ref_color[2];
-		// done filling temp light object
 		
-		Rd_r[0] = (Rd[0] + best_r) * Ref[0]; 
-		Rd_r[1] = (Rd[1] + best_r) * Ref[1]; 
-		Rd_r[2] = (Rd[2] + best_r) * Ref[2];
+		Rd_r[0] = Ref[0] * best_r;
+		Rd_r[1] = Ref[1] * best_r;
+		Rd_r[2] = Ref[2] * best_r;
+		
+		Rd_r[0] = Rd_r[0] + Ron[0];
+		Rd_r[1] = Rd_r[1] + Ron[1]; // try changing to sub
+		Rd_r[2] = Rd_r[2] + Ron[2];
+		
+		/*
+		Rd_r[0] = (Ron[0] + best_r) * Ref[0]; 
+		Rd_r[1] = (Ron[1] + best_r) * Ref[1];  // mess with this
+		Rd_r[2] = (Ron[2] + best_r) * Ref[2];*/
 		
 		normalize(Rd_r);
 		
 		shade_object(Ron, Rd_r, Rd, -1, best_i, Ref_light, color); // pass in -1 as distance_to_light because it won't be used since this is a reflection
 	}
 		
-		
-		
-		
-	
-	
-	
-	for(int j =  0; lights[j] != 0; j+=1) // new outer for loop which iterates for every light in the lights array
+			
+	for(int j =  0; lights[j] != 0; j+=1) // new for loop which iterates for every light in the lights array
 	{							
 		Rdn[0] = lights[j]->light.position[0] - Ron[0];
 		Rdn[1] = lights[j]->light.position[1] - Ron[1]; // sets Rdn using current light's position and the previously calculated Ron vector
@@ -1509,47 +1506,10 @@ void shade(double Rd[3], double Ro[3], double best_t, int best_i, Object** light
 		
 		double new_best_t = INFINITY; // creates new intersection t variable
 		int best_s = -1; // initializes variable to act as indication of "closest shadow object"
-		for(int k = 0; objects[k] != 0; k+=1) // iterates through objects
-		{
-			if(objects[best_i] == objects[k]) // checks to make sure that the object checked isn't the previously calculated closest object
-				continue;
-			double t = 0;  // sets t value to 0 before evaluating objects
-			
-			switch(objects[k]->kind) { // switch statement used to check object type and intersection information accordingly
-			case 0: // object is a camera so break
-				break; 
-			case 1: // object is a sphere so calculate sphere intersection
-				t = sphere_intersection(Ron, Rdn,
-											objects[k]->sphere.position,
-											objects[k]->sphere.radius);	
-		
-				break;
-			case 2: // object is a plane so calculate plane intersection
-				t = plane_intersection(Ron, Rdn,
-											objects[k]->plane.position,
-											objects[k]->plane.normal);
-									
-				break;
-			case 3: // object is a light so break
-				break;
-			default:
-				fprintf(stderr, "Error: Unrecognized object.\n"); // Error in case siwtch doesn't evaluate as a known object but should never happen
-				exit(1);
-			}
-			if (t > distance_to_light)
-			{
-				continue;
-			}
-			if (t > 0 && t < new_best_t) // stores new_best_t if there's a dominant shadow intersection. Also stores best_s to record current object index
-			{
-				new_best_t = t; 
-				best_s = k;
-			}
-		}
-	
+		shoot(Ron, Rdn, distance_to_light, best_i, &new_best_t, &best_s);
 	
 		// recursive shade call here? or restructure
-		
+			
 		
 		if(best_s == -1) // no closest shadow was found since best_s was unmodified (would never be set to -1 otherwise)
 		{ 								
@@ -1561,3 +1521,45 @@ void shade(double Rd[3], double Ro[3], double best_t, int best_i, Object** light
 	}
 }
 
+void shoot(double Ro[3], double Rd[3], double distance, int current_index, double* final_distance, int* final_index)
+{
+	double best_t = INFINITY;
+	int best_i = -1;
+	for(int i = 0; objects[i] != 0; i += 1)
+	{
+		if(current_index == i)
+			continue;
+		
+		double t = 0;
+		switch(objects[i]->kind) { // switch statement used to check object type and intersection information accordingly
+			case 0: // object is a camera so break
+				break; 
+			case 1: // object is a sphere so calculate sphere intersection
+				t = sphere_intersection(Ro, Rd,
+											objects[i]->sphere.position,
+											objects[i]->sphere.radius);	
+		
+				break;
+			case 2: // object is a plane so calculate plane intersection
+				t = plane_intersection(Ro, Rd,
+											objects[i]->plane.position,
+											objects[i]->plane.normal);
+									
+				break;
+			case 3: // object is a light so break
+				break;
+			default:
+				fprintf(stderr, "Error: Unrecognized object.\n"); // Error in case siwtch doesn't evaluate as a known object but should never happen
+				exit(1);
+			}
+		if(t > distance && distance != INFINITY) // makes sure intersection isn't beyond where we want to project
+			continue;
+		if (t > 0 && t < best_t) // stores new_best_t if there's a dominant shadow intersection. Also stores best_s to record current object index
+			{
+				best_t = t; 
+				best_i = i;
+			} 
+	}
+	*final_distance = best_t;
+	*final_index = best_i;
+}
