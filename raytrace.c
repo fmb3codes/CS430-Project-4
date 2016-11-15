@@ -95,11 +95,13 @@ double fang(Object* light, double direction[3], double theta); // performs angul
 
 void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to_light, int best_i, Object* light, double* color);
 
-void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** lights, int depth, double* color);
+void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** lights, int ior, int depth, double* color);
 
 void shoot(double Ro[3], double Rd[3], double distance, int current_index, double* final_distance, int* final_index);
 
 void reflect_vector(double* d, double* p, int index, double* output);
+
+void refract_vector(double* d, double* p, int out_ior, int index, double* output);
 
 /////////////
 void print_objects(Object** objects); // testing helper function
@@ -828,7 +830,7 @@ void raycasting()
 					//test[1] = (Rd[1] * best_t) + Ro[1];
 					//test[2] = (Rd[2] * best_t) + Ro[2];
 					//printf("Color values before shade are [%lf %lf %lf]\n", color[0], color[1], color[2]);
-					shade(Ro, Rd, best_t, best_i, lights, 0, color);
+					shade(Ro, Rd, best_t, best_i, lights, 1, 0, color);
 					//shade(test, Rd, best_t, best_i, lights, 0, color);
 					//printf("Color values after shade are [%lf %lf %lf]\n", color[0], color[1], color[2]);
 					
@@ -1306,7 +1308,7 @@ void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to
 }
 
 
-void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** lights, int depth, double* color)
+void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** lights, int ior, int depth, double* color)
 {
 	if(depth > 7)
 	{
@@ -1324,27 +1326,46 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 	Ron[2] = (best_t * Rd[2]) + Ro[2];
 	
 	
+	normalize(Rd);
 	//need to normalize Rd?
 	
 	// getting reflection vector
-	double Ref[3] = {0, 0, 0};
+	double reflection_vector[3] = {0, 0, 0};
 	
-	normalize(Rd);
-	
-	reflect_vector(Rd, Ron, best_i, Ref);
+	reflect_vector(Rd, Ron, best_i, reflection_vector);
 	
 	// check for wrong object type? shouldn't have to
 	
 	// end of getting reflection vector
 	
-	normalize(Ref); // normalize new Reflection vector
+	// getting refraction vector
+	double refraction_vector[3] = {0, 0, 0};
 	
+	refract_vector(Rd, Ron, ior, best_i, refraction_vector);
+	
+	// end of getting refraction vector
+	
+	normalize(reflection_vector); // normalize new reflection vector
+	normalize(refraction_vector); // normalize new refraction vector
+	
+	
+	///////////////////////TRY ASSIGNING VALUES TO T/O VARIABLES
 	// shoot out reflection vector
-	double best_ref_t;
-	int best_ref_o;
-	shoot(Ron, Ref, INFINITY, best_i, &best_ref_t, &best_ref_o);
+	double best_reflect_t;
+	int best_reflect_o;
+	shoot(Ron, reflection_vector, INFINITY, best_i, &best_reflect_t, &best_reflect_o);
 	
-	if(best_ref_o == -1) // change this?
+	// shoot out refraction vector
+	double best_refract_t;
+	int best_refract_o;
+	
+	if(objects[best_i]->kind == 1)
+		shoot(Ron, refraction_vector, INFINITY, -1, &best_refract_t, &best_refract_o); // -1 for index because we don't want to check for same-object intersection with a sphere(maybe change to 0 instead)
+	if(objects[best_i]->kind == 2)
+		shoot(Ron, refraction_vector, INFINITY, best_i, &best_refract_t, &best_refract_o); 
+	
+	
+	if(best_reflect_o == -1 && best_refract_o == -1) // change this?
 	{
 		color[0] = 0;
 		color[1] = 0;
@@ -1353,86 +1374,172 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 	
 	else // may need to adjust this if statement
 	{
-		double Ref_color[3] = {0, 0, 0};
-		double Rd_r[3] = {0, 0, 0};
+		double reflection_color[3] = {0, 0, 0};
+		double refraction_color[3] = {0, 0, 0};
+		double Rd_reflect[3] = {0, 0, 0};
+		double Rd_refract[3] = {0, 0, 0};
 		double reflectivity = 0;
+		double refractivity = 0;
 		double reflect_ior = 1; // put this in if statement eventually
+		double refract_ior = 1;
 		
 		// maybe modularize this
 		if(objects[best_i]->kind == 1)
 		{
 			reflectivity = objects[best_i]->sphere.reflectivity;
-			//reflect_ior = objects[best_ref_o]->sphere.ior; // best_ref_o here because it's the ior of the object reflected off of?
+			refractivity = objects[best_i]->sphere.refractivity;
+			//reflect_ior = objects[best_reflect_o]->sphere.ior; // best_reflect_o here because it's the ior of the object reflected off of?
 		}
 		if(objects[best_i]->kind == 2)
 		{
 			reflectivity = objects[best_i]->plane.reflectivity;
-			//reflect_ior = objects[best_ref_o]->plane.ior;
+			refractivity = objects[best_i]->plane.refractivity;
+			//reflect_ior = objects[best_reflect_o]->plane.ior;
 		}
 		
 		
-		/*
-		Rd_r[0] = (Rd[0] + best_r) * Ref; // should it be Rd_r or Ro_r?
-		Rd_r[1] = (Rd[1] + best_r) * Ref; // maybe add back and use as first param in shade call below
-		Rd_r[2] = (Rd[2] + best_r) * Ref;*/
-		
-		//shade(Ref, Ron, best_r, best_o, lights, depth + 1, Ref_color);
-		
-		//Ref_color[0] *= reflectivity;
-		//Ref_color[1] *= reflectivity;
-		//Ref_color[2] *= reflectivity;
+		if(best_reflect_o >= 1) // CHANGE THIS TO >= 0?
+		{
 		
 		
-		/*//invert reflection vector?
-		Ref[0] *= -1;
-		Ref[1] *= -1;
-		Ref[2] *= -1;*/
+			if(objects[best_reflect_o]->kind == 1)
+			{
+				reflect_ior = objects[best_reflect_o]->sphere.ior;
+			}
 		
-		// create reflection light object
-		Object* Ref_light;
-		Ref_light = (Object*)malloc(sizeof(Object));
+			if(objects[best_reflect_o]->kind == 2)
+			{
+				reflect_ior = objects[best_reflect_o]->plane.ior;
+			}
+			// end of pulling reflectivity/ior values
+			
+			/*
+			Rd_reflect[0] = (Rd[0] + best_r) * reflection_vector; // should it be Rd_reflect or Ro_r?
+			Rd_reflect[1] = (Rd[1] + best_r) * reflection_vector; // maybe add back and use as first param in shade call below
+			Rd_reflect[2] = (Rd[2] + best_r) * reflection_vector;*/
+			
+			//shade(reflection_vector, Ron, best_r, best_o, lights, depth + 1, reflection_color);
+			
+			//reflection_color[0] *= reflectivity;
+			//reflection_color[1] *= reflectivity;
+			//reflection_color[2] *= reflectivity;
+			
+			
+			/*//invert reflection vector?
+			reflection_vector[0] *= -1;
+			reflection_vector[1] *= -1;
+			reflection_vector[2] *= -1;*/
+			
+			// create reflection light object
+			Object* reflection_light;
+			reflection_light = (Object*)malloc(sizeof(Object));
+			
+			reflection_light->light.kind_light = 2;
+			
+			
+			shade(Ron, reflection_vector, best_reflect_t, best_reflect_o, lights, reflect_ior, depth + 1, reflection_color);
+			
+			reflection_color[0] = reflection_color[0] * reflectivity;
+			reflection_color[1] = reflection_color[1] * reflectivity;
+			reflection_color[2] = reflection_color[2] * reflectivity;
+			
+			reflection_light->light.direction[0] = reflection_vector[0] * -1;
+			reflection_light->light.direction[1] = reflection_vector[1] * -1; // rethink this?
+			reflection_light->light.direction[2] = reflection_vector[2] * -1;
+			
+			reflection_light->light.color[0] = reflection_color[0];
+			reflection_light->light.color[1] = reflection_color[1];
+			reflection_light->light.color[2] = reflection_color[2];
+			
+			printf("Temp light direction is: [%lf %lf %lf]\n", reflection_light->light.direction[0], reflection_light->light.direction[1], reflection_light->light.direction[2]);
+			printf("Temp light color is: [%lf %lf %lf]\n", reflection_light->light.color[0], reflection_light->light.color[1], reflection_light->light.color[2]);
+			
+			
+			/////
+			
+			reflection_vector[0] = reflection_vector[0] * best_reflect_t;
+			reflection_vector[1] = reflection_vector[1] * best_reflect_t;
+			reflection_vector[2] = reflection_vector[2] * best_reflect_t;
+			
+			Rd_reflect[0] = reflection_vector[0] - Ron[0];
+			Rd_reflect[1] = reflection_vector[1] - Ron[1]; // try changing to sub
+			Rd_reflect[2] = reflection_vector[2] - Ron[2];
+			
+			
+			/*
+			Rd_reflect[0] = (Ron[0] + best_r) * reflection_vector[0]; 
+			Rd_reflect[1] = (Ron[1] + best_r) * reflection_vector[1];  // mess with this
+			Rd_reflect[2] = (Ron[2] + best_r) * reflection_vector[2];*/
+			
+			normalize(Rd_reflect); // toggle?
+			
+			shade_object(Ron, Rd_reflect, Rd, INFINITY, best_i, reflection_light, color); // pass in INFINITY (change to -1?) as distance_to_light because it won't be used since this is a reflection
+		}
 		
-		Ref_light->light.kind_light = 2;
+		if(best_refract_o >= 1)
+		{
+			
+			if(objects[best_refract_o]->kind == 1)
+			{
+				refract_ior = objects[best_refract_o]->sphere.ior;
+			}
+		
+			if(objects[best_refract_o]->kind == 2)
+			{
+				refract_ior = objects[best_refract_o]->plane.ior;
+			}
+			
+			
+			refraction_vector[0] = refraction_vector[0] * .0314;
+			refraction_vector[1] = refraction_vector[1] * .0314;
+			refraction_vector[2] = refraction_vector[2] * .0314;
+			
+			// create refraction light object
+			Object* refraction_light;
+			refraction_light = (Object*)malloc(sizeof(Object));
+			
+			refraction_light->light.kind_light = 2;
+					
+			shade(Ron, refraction_vector, best_refract_t, best_refract_o, lights, refract_ior, depth + 1, refraction_color);
+			
+			refraction_color[0] = refraction_color[0] * refractivity;
+			refraction_color[1] = refraction_color[1] * refractivity;
+			refraction_color[2] = refraction_color[2] * refractivity;
+			
+			refraction_light->light.direction[0] = refraction_vector[0] * -1;
+			refraction_light->light.direction[1] = refraction_vector[1] * -1; // rethink this?
+			refraction_light->light.direction[2] = refraction_vector[2] * -1;
+			
+			refraction_light->light.color[0] = refraction_color[0];
+			refraction_light->light.color[1] = refraction_color[1];
+			refraction_light->light.color[2] = refraction_color[2];
+			
+			
+			/////
+			
+			refraction_vector[0] = refraction_vector[0] * best_refract_t;
+			refraction_vector[1] = refraction_vector[1] * best_refract_t;
+			refraction_vector[2] = refraction_vector[2] * best_refract_t;
+			
+			Rd_refract[0] = refraction_vector[0] - Ron[0];
+			Rd_refract[1] = refraction_vector[1] - Ron[1]; // try changing to sub
+			Rd_refract[2] = refraction_vector[2] - Ron[2];
+			
+			
+			/*
+			Rd_reflect[0] = (Ron[0] + best_r) * reflection_vector[0]; 
+			Rd_reflect[1] = (Ron[1] + best_r) * reflection_vector[1];  // mess with this
+			Rd_reflect[2] = (Ron[2] + best_r) * reflection_vector[2];*/
+			
+			normalize(Rd_refract); // toggle?
+			
+			shade_object(Ron, Rd_refract, Rd, INFINITY, best_i, refraction_light, color); // pass in INFINITY (change to -1?) as distance_to_light because it won't be used since this is a refraction
+			
+			
+		}
 		
 		
-		shade(Ron, Ref, best_ref_t, best_ref_o, lights, depth + 1, Ref_color);
 		
-		Ref_color[0] = Ref_color[0] * reflectivity;
-		Ref_color[1] = Ref_color[1] * reflectivity;
-		Ref_color[2] = Ref_color[2] * reflectivity;
-		
-		Ref_light->light.direction[0] = Ref[0] * -1;
-		Ref_light->light.direction[1] = Ref[1] * -1; // rethink this?
-		Ref_light->light.direction[2] = Ref[2] * -1;
-		
-		Ref_light->light.color[0] = Ref_color[0];
-		Ref_light->light.color[1] = Ref_color[1];
-		Ref_light->light.color[2] = Ref_color[2];
-		
-		printf("Temp light direction is: [%lf %lf %lf]\n", Ref_light->light.direction[0], Ref_light->light.direction[1], Ref_light->light.direction[2]);
-		printf("Temp light color is: [%lf %lf %lf]\n", Ref_light->light.color[0], Ref_light->light.color[1], Ref_light->light.color[2]);
-		
-		
-		/////
-		
-		Ref[0] = Ref[0] * best_ref_t;
-		Ref[1] = Ref[1] * best_ref_t;
-		Ref[2] = Ref[2] * best_ref_t;
-		
-		Rd_r[0] = Ref[0] - Ron[0];
-		Rd_r[1] = Ref[1] - Ron[1]; // try changing to sub
-		Rd_r[2] = Ref[2] - Ron[2];
-		
-		
-		/*
-		Rd_r[0] = (Ron[0] + best_r) * Ref[0]; 
-		Rd_r[1] = (Ron[1] + best_r) * Ref[1];  // mess with this
-		Rd_r[2] = (Ron[2] + best_r) * Ref[2];*/
-		
-		normalize(Rd_r); // toggle?
-		
-		shade_object(Ron, Rd_r, Rd, INFINITY, best_i, Ref_light, color); // pass in INFINITY (change to -1?) as distance_to_light because it won't be used since this is a reflection
-	
 		/*if(reflectivity == -1) // consider changing this
 			reflectivity = 0;
 			
@@ -1564,4 +1671,88 @@ void reflect_vector(double* d, double* p, int index, double* output)
 	output[0] = d[0] - temp_vector[0];
 	output[1] = d[1] - temp_vector[1];
 	output[2] = d[2] - temp_vector[2];
+}
+
+void refract_vector(double* d, double* p, int out_ior, int index, double* output)
+{
+	double temp_d[3] = {0, 0, 0};
+	double temp_p[3] = {0, 0, 0};
+	double inc_ior = 0;
+	double normal[3];
+	double coord_1[3];
+	double coord_2[3];
+	double sin_angle = 0;
+	double sin_o = 0;
+	double cos_o = 0;
+	
+	// determining ior value
+	if(objects[index]->kind == 1)
+	{
+		inc_ior = objects[index]->sphere.ior;
+	}
+	
+	if(objects[index]->kind == 2)
+	{
+		inc_ior = objects[index]->plane.ior;
+	}
+	
+	// copying parameters to temp vectors
+	temp_d[0] = d[0];
+	temp_d[1] = d[1];
+	temp_d[2] = d[2];
+	
+	temp_p[0] = p[0];
+	temp_p[1] = p[1];
+	temp_p[2] = p[2];
+	
+	
+	// determining normal value
+	if(objects[index]->kind == 1)
+	{
+		normal[0] = p[0] - objects[index]->sphere.position[0];
+		normal[1] = p[1] - objects[index]->sphere.position[1];
+		normal[2] = p[2] - objects[index]->sphere.position[2];
+	}
+	if(objects[index]->kind == 2)
+	{
+		normal[0] = objects[index]->plane.normal[0];
+		normal[1] = objects[index]->plane.normal[1];
+		normal[2] = objects[index]->plane.normal[2];
+	}
+	
+	// normalizing vectors
+	normalize(temp_d);
+	normalize(temp_p);
+	normalize(normal);
+	
+	// cross product to find coordinate frame 1
+	coord_1[0] = normal[1]*temp_d[2] - normal[2]*temp_d[1];
+	coord_1[1] = normal[2]*temp_d[0] - normal[0]*temp_d[2];
+	coord_1[2] = normal[0]*temp_d[1] - normal[1]*temp_d[0];
+	
+	normalize(coord_1);
+	
+	coord_2[0] = coord_1[1]*normal[2] - coord_1[2]*normal[1];
+	coord_2[1] = coord_1[2]*normal[0] - coord_1[0]*normal[2];
+	coord_2[2] = coord_1[0]*normal[1] - coord_1[1]*normal[0];
+	
+	//normalize(coord_2);
+	
+	// determine transmission vector angle/direction
+	sin_angle = ((temp_d[0]*coord_2[0]) + (temp_d[1]*coord_2[1]) + (temp_d[2]*coord_2[2]));
+	sin_o = (out_ior / inc_ior) * sin_angle;
+	cos_o = sqrt(1 - sqr(sin_o));
+	
+	normal[0] = normal[0] * (-1 * cos_o);
+	normal[1] = normal[1] * (-1 * cos_o);
+	normal[2] = normal[2] * (-1 * cos_o);
+	
+	coord_2[0] = coord_2[0] * sin_o;
+	coord_2[1] = coord_2[1] * sin_o;
+	coord_2[2] = coord_2[2] * sin_o;
+	
+	output[0] = normal[0] + coord_2[0];
+	output[1] = normal[1] + coord_2[1];
+	output[2] = normal[2] + coord_2[2];
+	
 }
