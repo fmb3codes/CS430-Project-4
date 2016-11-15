@@ -101,7 +101,7 @@ void shoot(double Ro[3], double Rd[3], double distance, int current_index, doubl
 
 void reflect_vector(double* d, double* p, int index, double* output);
 
-void refract_vector(double* d, double* p, int out_ior, int index, double* output);
+void refract_vector(double* d, double* p, int external_ior, int index, double* output);
 
 /////////////
 void print_objects(Object** objects); // testing helper function
@@ -348,17 +348,40 @@ void read_scene(char* filename)
 		}
 		else if(objects[i]->kind == 1)
 		{
-			if(sphere_diff_color_read != 1 ||  sphere_spec_color_read != 1 ||  sphere_position_read != 1 || sphere_radius_read != 1 || sphere_reflectivity_read != 1 || sphere_refractivity_read != 1 || sphere_ior_read != 1)
+			if(sphere_diff_color_read != 1 ||  sphere_spec_color_read != 1 ||  sphere_position_read != 1 || sphere_radius_read != 1)
 			{
-				fprintf(stderr, "Error: Object #%d (0-indexed) is a sphere which should have seven unique fields: diffuse_color/specular_color/position/radius/reflectivity/refractivity/ior\n", i);
+				fprintf(stderr, "Error: Object #%d (0-indexed) is a sphere which should have four unique fields: diffuse_color/specular_color/position/radius\n", i);
 				exit(1);
 			}
+			if(sphere_reflectivity_read != 1)
+				objects[i]->sphere.reflectivity = 0;
+			if(sphere_refractivity_read != 1)
+				objects[i]->sphere.refractivity = 0;
+			if(sphere_ior_read != 1)
+				objects[i]->sphere.ior = 1;
+			if((objects[i]->sphere.reflectivity + objects[i]->sphere.refractivity) > 1) // CONFIRM this is correct
+			{
+				fprintf(stderr, "Error: Object #%d (0-indexed) is a sphere which has an invalid combination of reflectivity/refractivity values; refractivity + refractivity must not be greater than 1.\n", i);
+				exit(1);
+			}
+			
 		}
 		else if(objects[i]->kind == 2)
 		{
-			if(plane_diff_color_read != 1 ||  plane_spec_color_read != 1 || plane_position_read != 1 || plane_normal_read != 1 || plane_reflectivity_read != 1 || plane_refractivity_read != 1 || plane_ior_read != 1)
+			if(plane_diff_color_read != 1 ||  plane_spec_color_read != 1 || plane_position_read != 1 || plane_normal_read != 1)
 			{
-				fprintf(stderr, "Error: Object #%d (0-indexed) is a plane which should have seven unique fields: diffuse_color/specular_color/position/normal/reflectivity/refractivity/ior\n", i);
+				fprintf(stderr, "Error: Object #%d (0-indexed) is a plane which should have four unique fields: diffuse_color/specular_color/position/normal\n", i);
+				exit(1);
+			}
+			if(plane_reflectivity_read != 1)
+				objects[i]->plane.reflectivity = 0;
+			if(plane_refractivity_read != 1)
+				objects[i]->plane.refractivity = 0;
+			if(plane_ior_read != 1)
+				objects[i]->plane.ior = 1;
+			if((objects[i]->plane.reflectivity + objects[i]->plane.refractivity) > 1) // confirm this is correct
+			{
+				fprintf(stderr, "Error: Object #%d (0-indexed) is a plane which has an invalid combination of reflectivity/refractivity values; refractivity + refractivity must not be greater than 1.\n", i);
 				exit(1);
 			}
 		}
@@ -1285,8 +1308,8 @@ void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to
 		object_direction[2] = Rdn[2] * -1;
 		//normalize(object_direction);
 		
-		double fang_val;
-		double frad_val;
+		double fang_val = 0;
+		double frad_val = 0;
 		
 		if(light->light.kind_light == 2)
 		{
@@ -1443,6 +1466,14 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 			reflection_color[1] = reflection_color[1] * reflectivity;
 			reflection_color[2] = reflection_color[2] * reflectivity;
 			
+			// testing color correctness
+			
+			/*color[0] += reflection_color[0];
+			color[1] += reflection_color[1];
+			color[2] += reflection_color[2];*/
+			
+			//
+			
 			reflection_light->light.direction[0] = reflection_vector[0] * -1;
 			reflection_light->light.direction[1] = reflection_vector[1] * -1; // rethink this?
 			reflection_light->light.direction[2] = reflection_vector[2] * -1;
@@ -1490,9 +1521,9 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 			}
 			
 			
-			refraction_vector[0] = refraction_vector[0] * .0314;
-			refraction_vector[1] = refraction_vector[1] * .0314;
-			refraction_vector[2] = refraction_vector[2] * .0314;
+			refraction_vector[0] = refraction_vector[0] * .01;
+			refraction_vector[1] = refraction_vector[1] * .01; // change this constant?
+			refraction_vector[2] = refraction_vector[2] * .01;
 			
 			// create refraction light object
 			Object* refraction_light;
@@ -1505,6 +1536,14 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 			refraction_color[0] = refraction_color[0] * refractivity;
 			refraction_color[1] = refraction_color[1] * refractivity;
 			refraction_color[2] = refraction_color[2] * refractivity;
+			
+			// testing color correctness
+			
+			/*color[0] += refraction_color[0];
+			color[1] += refraction_color[1];
+			color[2] += refraction_color[2];*/
+			
+			//
 			
 			refraction_light->light.direction[0] = refraction_vector[0] * -1;
 			refraction_light->light.direction[1] = refraction_vector[1] * -1; // rethink this?
@@ -1540,10 +1579,12 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 		
 		
 		
-		/*if(reflectivity == -1) // consider changing this
+		if(reflectivity == -1) // consider changing this
 			reflectivity = 0;
+		if(refractivity == -1)
+			refractivity = 0;
 			
-		if(fabs(reflectivity) <= 0)
+		if(fabs(reflectivity) <= 0 && fabs(refractivity) <= 0)
 		{
 			color[0] = 0;
 			color[1] = 0;
@@ -1551,18 +1592,29 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 		}
 		else
 		{
-			double color_diff = 1.0 - reflectivity;
+			double color_diff = 1.0 - reflectivity - refractivity;
 			if(fabs(color_diff) <= 0)
 				color_diff = 0;
 			double new_color[3] = {0, 0, 0};
-			new_color[0] = objects[best_i]->plane.diffuse_color[0] * color_diff;
-			new_color[1] = objects[best_i]->plane.diffuse_color[1] * color_diff;
-			new_color[2] = objects[best_i]->plane.diffuse_color[2] * color_diff;
+			
+			if(objects[best_i]->kind == 1)
+			{
+				new_color[0] = objects[best_i]->sphere.diffuse_color[0] * color_diff;
+				new_color[1] = objects[best_i]->sphere.diffuse_color[1] * color_diff;
+				new_color[2] = objects[best_i]->sphere.diffuse_color[2] * color_diff;
+			}
+			
+			if(objects[best_i]->kind == 2)
+			{
+				new_color[0] = objects[best_i]->plane.diffuse_color[0] * color_diff;
+				new_color[1] = objects[best_i]->plane.diffuse_color[1] * color_diff;
+				new_color[2] = objects[best_i]->plane.diffuse_color[2] * color_diff;
+			}
 			
 			color[0] += new_color[0];
 			color[1] += new_color[1];
 			color[2] += new_color[2];
-		}*/
+		}
 		
 	}
 		
@@ -1590,7 +1642,8 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 		}
 		
 		// else set color to 0, 0, 0 just in case?
-							
+			
+		// add background color here or somewhere?
 	}
 }
 
@@ -1673,11 +1726,11 @@ void reflect_vector(double* d, double* p, int index, double* output)
 	output[2] = d[2] - temp_vector[2];
 }
 
-void refract_vector(double* d, double* p, int out_ior, int index, double* output)
+void refract_vector(double* d, double* p, int external_ior, int index, double* output)
 {
 	double temp_d[3] = {0, 0, 0};
 	double temp_p[3] = {0, 0, 0};
-	double inc_ior = 0;
+	double transmit_ior = 0;
 	double normal[3];
 	double coord_1[3];
 	double coord_2[3];
@@ -1688,13 +1741,14 @@ void refract_vector(double* d, double* p, int out_ior, int index, double* output
 	// determining ior value
 	if(objects[index]->kind == 1)
 	{
-		inc_ior = objects[index]->sphere.ior;
+		transmit_ior = objects[index]->sphere.ior;
 	}
 	
 	if(objects[index]->kind == 2)
 	{
-		inc_ior = objects[index]->plane.ior;
+		transmit_ior = objects[index]->plane.ior;
 	}
+	
 	
 	// copying parameters to temp vectors
 	temp_d[0] = d[0];
@@ -1740,12 +1794,12 @@ void refract_vector(double* d, double* p, int out_ior, int index, double* output
 	
 	// determine transmission vector angle/direction
 	sin_angle = ((temp_d[0]*coord_2[0]) + (temp_d[1]*coord_2[1]) + (temp_d[2]*coord_2[2]));
-	sin_o = (out_ior / inc_ior) * sin_angle;
+	sin_o = (external_ior / transmit_ior) * sin_angle;
 	cos_o = sqrt(1 - sqr(sin_o));
 	
-	normal[0] = normal[0] * (-1 * cos_o);
-	normal[1] = normal[1] * (-1 * cos_o);
-	normal[2] = normal[2] * (-1 * cos_o);
+	normal[0] = (-1 * normal[0]) * cos_o;
+	normal[1] = (-1 * normal[1]) * cos_o;
+	normal[2] = (-1 * normal[2]) * cos_o;
 	
 	coord_2[0] = coord_2[0] * sin_o;
 	coord_2[1] = coord_2[1] * sin_o;
