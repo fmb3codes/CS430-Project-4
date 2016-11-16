@@ -46,11 +46,16 @@ void diffuse_calculation(double n[3], double l[3], double il[3], double kd[3], d
 
 void specular_calculation(double n[3], double l[3], double il[3], double ks[3], double v[3], double r[3], double ns, double* output); // performs specular color calcuation
 
+void shoot(double Ro[3], double Rd[3], double distance, int current_index, double* final_distance, int* final_index); // shoots a ray out into the scene and indirectly returns the intersection distance/object index
+
+void reflect_vector(double* d, double* p, int index, double* output); // calculates reflected vector
+
+void refract_vector(double* d, double* p, int external_ior, int index, double* output); // calculates refracted vector
+
 
 // object struct typedef'd as Object intended to hold any of the specified objects in the given scene (.json) file
 typedef struct {
   int kind; // 0 = camera, 1 = sphere, 2 = plane, 3 = light
-  double color[3]; // potentially remove here and add below
   union {
     struct {
       double width;
@@ -75,7 +80,7 @@ typedef struct {
 	  double ior;
     } plane;
     struct {
-	  int kind_light; // 0 = point light, 1 = spot light, 2 = reflection off an object
+	  int kind_light; // 0 = point light, 1 = spot light, 2 = reflection/refraction off an object
 	  double color[3];
 	  double position[3];
 	  double direction[3];
@@ -88,23 +93,14 @@ typedef struct {
   };
 } Object;
 
-// radial/angular attenuation function prototypes placed after Object struct as they require it to be defined as a parameter
+// numerous function prototypes placed after Object struct as they require it to be defined as a parameter
 double frad(Object* light, double dl); // performs radial attenuation
 
 double fang(Object* light, double direction[3], double theta); // performs angular attenuation
 
-void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to_light, int best_i, Object* light, double* color);
+void direct_shade(double Ron[3], double Rdn[3], double Rd[3], double distance_to_light, int best_i, Object* light, double* color); // uses a light source to compute diffuse/specular/frad/fang calculations and adds it to given color vector
 
-void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** lights, int ior, int depth, double* color);
-
-void shoot(double Ro[3], double Rd[3], double distance, int current_index, double* final_distance, int* final_index);
-
-void reflect_vector(double* d, double* p, int index, double* output);
-
-void refract_vector(double* d, double* p, int external_ior, int index, double* output);
-
-/////////////
-void print_objects(Object** objects); // testing helper function
+void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** lights, int ior, int depth, double* color); // master shade function which is recursively called and handles shading
 
 
 // header_data buffer which is intended to contain all relevant header information of ppm file
@@ -200,10 +196,6 @@ int main(int argc, char** argv)
 	image_buffer = (image_data *)malloc(sizeof(image_data) * width * height + 1); // allocates memory for image based on width * height of image as given by command line
   
 	read_scene(input_file); // parses json input file
-	
-	print_objects(objects);
-	
-	//exit(1);
 	
 	raycasting(); // executes raycasting based on information read in from json file in conjunction with the global image_buffer which handles the image pixels
  
@@ -359,7 +351,7 @@ void read_scene(char* filename)
 				objects[i]->sphere.refractivity = 0;
 			if(sphere_ior_read != 1)
 				objects[i]->sphere.ior = 1;
-			if((objects[i]->sphere.reflectivity + objects[i]->sphere.refractivity) > 1) // CONFIRM this is correct
+			if((objects[i]->sphere.reflectivity + objects[i]->sphere.refractivity) > 1) 
 			{
 				fprintf(stderr, "Error: Object #%d (0-indexed) is a sphere which has an invalid combination of reflectivity/refractivity values; refractivity + refractivity must not be greater than 1.\n", i);
 				exit(1);
@@ -379,7 +371,7 @@ void read_scene(char* filename)
 				objects[i]->plane.refractivity = 0;
 			if(plane_ior_read != 1)
 				objects[i]->plane.ior = 1;
-			if((objects[i]->plane.reflectivity + objects[i]->plane.refractivity) > 1) // confirm this is correct
+			if((objects[i]->plane.reflectivity + objects[i]->plane.refractivity) > 1) 
 			{
 				fprintf(stderr, "Error: Object #%d (0-indexed) is a plane which has an invalid combination of reflectivity/refractivity values; refractivity + refractivity must not be greater than 1.\n", i);
 				exit(1);
@@ -609,9 +601,6 @@ void read_scene(char* filename)
 				plane_ior_read++;
 			}
 		}	
-
-		
-		// 	DO ERROR CHECKING ON REFLECTIVITY/REFRACTIVITY/IOR VALUES. CHECK IF REFLECTIVITY + REFRACTIVITY > 1? AND PROMPT ERROR IF SO. DON'T FORGET THIS LAST PART
 		
 		
 		else // after key was identified as width/height/radius/radial-a2/radial-a1/radial-a0/angular-a0/theta, object type is unknown so display an error
@@ -934,7 +923,7 @@ double sphere_intersection(double* Ro, double* Rd, double* C, double r)
 	
 	det = sqrt(det);
 	
-	double t0 = (-b - det) / (2 * a);
+	double t0 = (-b - det) / (2 * a);	
 	if(t0 > 0) return t0; // t0 indicates a sphere intersection so return it
 	double t1 = (-b + det) / (2 * a);
 	if(t1 > 0) return t1; // t1 indicates a sphere intersection so return it
@@ -1093,7 +1082,6 @@ double clamp(double value)
 // does radial attenutation calculations and returns value accordingly
 double frad(Object* light, double dl)
 {
-	// check for dl value being infinity?
 	if(light->light.radial_a2 == 0) // invalid a2 value so change to 1 as default
 		light->light.radial_a2 = 1.0;
 		
@@ -1157,72 +1145,8 @@ void specular_calculation(double n[3], double l[3], double il[3], double ks[3], 
     }
 }
 
-// helper function
-void print_objects(Object** objects)
-{
-	int i = 0;
-	while(objects[i] != NULL)
-	{
-			if(objects[i]->kind == 0)
-			{
-				printf("#%d object is a camera\n", i);
-				printf("Camera width is: %lf\n", objects[i]->camera.width);
-				printf("Camera height is: %lf\n", objects[i]->camera.height);
-				printf("-------------------------------------------------------\n");
-				i++;
-			}
-			else if(objects[i]->kind == 1)
-			{
-				printf("#%d object is a sphere\n", i);
-				printf("Sphere diffuse color is: [%lf, %lf, %lf]\n", objects[i]->sphere.diffuse_color[0], objects[i]->sphere.diffuse_color[1], objects[i]->sphere.diffuse_color[2]);
-				printf("Sphere specular color is: [%lf, %lf, %lf]\n", objects[i]->sphere.specular_color[0], objects[i]->sphere.specular_color[1], objects[i]->sphere.specular_color[2]);
-				printf("Sphere position is: [%lf, %lf, %lf]\n", objects[i]->sphere.position[0], objects[i]->sphere.position[1], objects[i]->sphere.position[2]);
-				printf("Sphere radius is: %lf\n", objects[i]->sphere.radius);
-				printf("Sphere reflectivity is: %lf\n", objects[i]->sphere.reflectivity);
-				printf("Sphere refractivity is: %lf\n", objects[i]->sphere.refractivity);
-				printf("Sphere ior is: %lf\n", objects[i]->sphere.ior);
-				printf("-------------------------------------------------------\n");
-				i++;
-			}
-			else if(objects[i]->kind == 2)
-			{
-				printf("#%d object is a plane\n", i);
-				printf("Plane diffuse color is: [%lf, %lf, %lf]\n", objects[i]->plane.diffuse_color[0], objects[i]->plane.diffuse_color[1], objects[i]->plane.diffuse_color[2]);
-				printf("Plane specular color is: [%lf, %lf, %lf]\n", objects[i]->plane.specular_color[0], objects[i]->plane.specular_color[1], objects[i]->plane.specular_color[2]);
-				printf("Plane position is: [%lf, %lf, %lf]\n", objects[i]->plane.position[0], objects[i]->plane.position[1], objects[i]->plane.position[2]);
-				printf("Plane normal is: [%lf, %lf, %lf]\n", objects[i]->plane.normal[0], objects[i]->plane.normal[1], objects[i]->plane.normal[2]);
-				printf("Plane reflectivity is: %lf\n", objects[i]->plane.reflectivity);
-				printf("Plane refractivity is: %lf\n", objects[i]->plane.refractivity);
-				printf("Plane ior is: %lf\n", objects[i]->plane.ior);
-				printf("-------------------------------------------------------\n");
-				i++;
-			}
-			else if(objects[i]->kind == 3)
-			{
-				if(objects[i]->light.kind_light == 0)
-					printf("#%d object is a point light\n", i);
-				else if(objects[i]->light.kind_light == 1)
-					printf("#%d object is a spot light\n", i);
-				printf("Light color is: [%lf, %lf, %lf]\n", objects[i]->light.color[0], objects[i]->light.color[1], objects[i]->light.color[2]);
-				printf("Light position is: [%lf, %lf, %lf]\n", objects[i]->light.position[0], objects[i]->light.position[1], objects[i]->light.position[2]);
-				printf("Light direction is: [%lf, %lf, %lf]\n", objects[i]->light.direction[0], objects[i]->light.direction[1], objects[i]->light.direction[2]);
-				printf("Light radial-a2 is: %lf\n", objects[i]->light.radial_a2);
-				printf("Light radial-a1 is: %lf\n", objects[i]->light.radial_a1);
-				printf("Light radial-a0 is: %lf\n", objects[i]->light.radial_a0);
-				printf("Light angular-a0 is: %lf\n", objects[i]->light.angular_a0);
-				printf("Light theta is: %lf\n", objects[i]->light.theta);
-				printf("-------------------------------------------------------\n");
-				i++;
-			}
-			else
-			{
-				fprintf(stderr, "Error: Unrecognized object.\n");
-				exit(1);
-			}
-	}
-}
 
-void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to_light, int best_i, Object* light, double* color)
+void direct_shade(double Ron[3], double Rdn[3], double Rd[3], double distance_to_light, int best_i, Object* light, double* color)
 {
 	// initializes necessary n, l, r, v, and nv vectors as well as diffuse and specular vectors
 	double n[3]; 
@@ -1231,8 +1155,11 @@ void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to
 	double v[3];
 	double nv[3];
 	double diffuse[3] = {0, 0, 0};
+	double diffuse_object[3] = {0, 0, 0};
 	double specular[3] = {0, 0, 0};
+	double specular_object[3] = {0, 0, 0};
 	double object_direction[3];
+	
 	
 	if(objects[best_i]->kind == 1) // determine some necessary variables according to sphere fields
 	{									
@@ -1240,99 +1167,85 @@ void shade_object(double Ron[3], double Rdn[3], double Rd[3], double distance_to
 		n[1] = Ron[1] - objects[best_i]->sphere.position[1]; // sets normal to the Ron vector minus the closest object's (sphere in this case) position
 		n[2] = Ron[2] - objects[best_i]->sphere.position[2];
 		
-		normalize(n);
+		diffuse_object[0] = objects[best_i]->sphere.diffuse_color[0];
+		diffuse_object[1] = objects[best_i]->sphere.diffuse_color[1];
+		diffuse_object[2] = objects[best_i]->sphere.diffuse_color[2];
 		
-		l[0] = Rdn[0];
-		l[1] = Rdn[1]; // sets l vector to the Rdn vector
-		l[2] = Rdn[2];
-		
-		normalize(l);
-		
-		// calculating reflection variable
-		reflect_vector(l, Ron, best_i, r);
-
-		/*r[0] = l[0] - temp_vector[0];
-		r[1] = l[1] - temp_vector[1];
-		r[2] = l[2] - temp_vector[2];	*/		
-		// end of calculating reflection variable
-		
-		v[0] = Rd[0];
-		v[1] = Rd[1]; // sets v vector to the Rd vector
-		v[2] = Rd[2];
-		
-		nv[0] = v[0] * -1;
-		nv[1] = v[1] * -1; // nv vector (v vector scaled by -1) to be passed into the specular_calculation function
-		nv[2] = v[2] * -1;
-		 
-		// passes in corresponding variables for diffuse and specular calculators, using the diffuse/specular vectors as output
-		diffuse_calculation(n, l, light->light.color, objects[best_i]->sphere.diffuse_color, diffuse);
-		specular_calculation(n, l, light->light.color, objects[best_i]->sphere.specular_color, v, r, 20, specular);
+		specular_object[0] = objects[best_i]->sphere.specular_color[0];
+		specular_object[1] = objects[best_i]->sphere.specular_color[1];
+		specular_object[2] = objects[best_i]->sphere.specular_color[2];
 	}
-	else if(objects[best_i]->kind == 2) // determine some necessary variables according to plane fields
+	
+	if(objects[best_i]->kind == 2) // determine some necessary variables according to plane fields
 	{									
 		n[0] = objects[best_i]->plane.normal[0];
 		n[1] = objects[best_i]->plane.normal[1]; // sets normal to the closets object's (plane in this case) normal
 		n[2] = objects[best_i]->plane.normal[2];
 		
-		normalize(n);
+		diffuse_object[0] = objects[best_i]->plane.diffuse_color[0];
+		diffuse_object[1] = objects[best_i]->plane.diffuse_color[1];
+		diffuse_object[2] = objects[best_i]->plane.diffuse_color[2];
 		
-		l[0] = Rdn[0];
-		l[1] = -Rdn[1]; // sets l vector to the Rdn vector but also inverts the y-coordinate, unlike what would be done for a plane's l vector
-		l[2] = Rdn[2];
+		specular_object[0] = objects[best_i]->plane.specular_color[0];
+		specular_object[1] = objects[best_i]->plane.specular_color[1];
+		specular_object[2] = objects[best_i]->plane.specular_color[2];
 		
-		normalize(l);
+		Rdn[1] *= -1; // inverts y-coordinate of Rdn to display properly
+	}
+	
+	normalize(n);
+	
+	l[0] = Rdn[0];
+	l[1] = Rdn[1]; // sets l vector to the Rdn vector
+	l[2] = Rdn[2];
+	
+	normalize(l);
 		
-		// calculating reflection variable
-		reflect_vector(l, Ron, best_i, r);			
-		// end of calculating reflection variable
+	// calculating reflection variable
+	reflect_vector(l, Ron, best_i, r);	
+	// end of calculating reflection variable
+	
+	v[0] = Rd[0];
+	v[1] = Rd[1]; // sets v vector to the Rd vector
+	v[2] = Rd[2];
+	
+	nv[0] = v[0] * -1;
+	nv[1] = v[1] * -1; // nv vector (v vector scaled by -1) to be passed into the specular_calculation function
+	nv[2] = v[2] * -1;
+	 
+	// passes in corresponding variables for diffuse and specular calculators, using the diffuse/specular vectors as output
+	diffuse_calculation(n, l, light->light.color, diffuse_object, diffuse);
+	specular_calculation(n, l, light->light.color, specular_object, v, r, 20, specular);
 		
-		/*r[0] = l[0] - temp_vector[0];
-		r[1] = l[1] - temp_vector[1];
-		r[2] = l[2] - temp_vector[2];	*/
-		
-		v[0] = Rd[0];
-		v[1] = Rd[1]; // sets v vector to the Rd vector
-		v[2] = Rd[2];
-		
-		nv[0] = v[0] * -1;
-		nv[1] = v[1] * -1; // nv vector (v vector scaled by -1) to be passed into the specular_calculation function
-		nv[2] = v[2] * -1;
-		
-
-		// passes in corresponding variables for diffuse and specular calculators, using the diffuse/specular vectors as output
-		diffuse_calculation(n, l, light->light.color, objects[best_i]->plane.diffuse_color, diffuse);
-		specular_calculation(n, l, light->light.color, objects[best_i]->plane.specular_color, v, r, 20, specular);																
-	}		
-		object_direction[0] = Rdn[0] * -1;
-		object_direction[1] = Rdn[1] * -1; 
-		object_direction[2] = Rdn[2] * -1;
-		//normalize(object_direction);
-		
-		double fang_val = 0;
-		double frad_val = 0;
-		
-		if(light->light.kind_light == 2)
-		{
-			printf("Checking a reflection off an object (kind_light = 2)\n");
-			fang_val = 1;
-			frad_val = 1;
-		}
-		
-		if(light->light.kind_light != 2) // maybe change this if statement
-		{
-			printf("Non-reflection of an object so do fang/frad attenuation (kind_light != 2)\n");
-			fang_val = fang(light, object_direction, light->light.theta);									
-			frad_val = frad(light, distance_to_light);
-		}
-		
-		color[0] += frad_val * fang_val * (diffuse[0] + specular[0]); 
-		color[1] += frad_val * fang_val * (diffuse[1] + specular[1]); 
-		color[2] += frad_val * fang_val * (diffuse[2] + specular[2]); 
+	object_direction[0] = Rdn[0] * -1;
+	object_direction[1] = Rdn[1] * -1; 
+	object_direction[2] = Rdn[2] * -1;
+	
+	double fang_val = 0;
+	double frad_val = 0;
+	
+	if(light->light.kind_light == 2) // light is neither a point/spotlight, but rather a temporary light object intended to hold reflection/refraction values, so don't to any attenuation and just set fang_val and frad_val both to 1
+	{
+		fang_val = 1;
+		frad_val = 1;
+	}
+	
+	if(light->light.kind_light != 2) // light is either a point/spotlight, so do attenuation accordingly
+	{
+		fang_val = fang(light, object_direction, light->light.theta);									
+		frad_val = frad(light, distance_to_light);
+	}
+	
+	color[0] += frad_val * fang_val * (diffuse[0] + specular[0]); 
+	color[1] += frad_val * fang_val * (diffuse[1] + specular[1]); 
+	color[2] += frad_val * fang_val * (diffuse[2] + specular[2]); 
 }
 
 
+// master function recursively called to shade the scene through the raytracing process
 void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** lights, int ior, int depth, double* color)
 {
+	// checks to make sure [recursive] depth doesn't exceed a level of 7
 	if(depth > 7)
 	{
 		color[0] = 0;
@@ -1348,83 +1261,112 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 	Ron[1] = (best_t * Rd[1]) + Ro[1]; // sets Ron using previously calculated object intersection
 	Ron[2] = (best_t * Rd[2]) + Ro[2];
 	
-	
 	normalize(Rd);
-	//need to normalize Rd?
 	
-	// getting reflection vector
+	// setup/calculate reflection vector
 	double reflection_vector[3] = {0, 0, 0};
 	
 	reflect_vector(Rd, Ron, best_i, reflection_vector);
+	// end of setting up/calculating reflection vector
 	
-	// check for wrong object type? shouldn't have to
-	
-	// end of getting reflection vector
-	
-	// getting refraction vector
+	// setup/calculate refraction vector
 	double refraction_vector[3] = {0, 0, 0};
 	
-	refract_vector(Rd, Ron, ior, best_i, refraction_vector);
-	
-	// end of getting refraction vector
-	
-	normalize(reflection_vector); // normalize new reflection vector
-	normalize(refraction_vector); // normalize new refraction vector
+	refract_vector(Rd, Ron, ior, best_i, refraction_vector);	
+	// end of setting up/calculating refraction vector
 	
 	
-	///////////////////////TRY ASSIGNING VALUES TO T/O VARIABLES
-	// shoot out reflection vector
-	double best_reflect_t;
-	int best_reflect_o;
-	shoot(Ron, reflection_vector, INFINITY, best_i, &best_reflect_t, &best_reflect_o);
+	// initializes the new reflected/refracted origin/direction vectors used in the recursive shading process
+	double Ro_reflect[3] = {0, 0, 0};
+	double Ro_refract[3] = {0, 0, 0};
+	double Rd_reflect[3] = {0, 0, 0};
+	double Rd_refract[3] = {0, 0, 0};
 	
-	// shoot out refraction vector
-	double best_refract_t;
-	int best_refract_o;
+	// Copying Ron vector over to Ro_reflect vector
+	Ro_reflect[0] = Ron[0];
+	Ro_reflect[1] = Ron[1];
+	Ro_reflect[2] = Ron[2];
 	
-	if(objects[best_i]->kind == 1)
-		shoot(Ron, refraction_vector, INFINITY, -1, &best_refract_t, &best_refract_o); // -1 for index because we don't want to check for same-object intersection with a sphere(maybe change to 0 instead)
-	if(objects[best_i]->kind == 2)
-		shoot(Ron, refraction_vector, INFINITY, best_i, &best_refract_t, &best_refract_o); 
+	// Copying Ron vector over to Ro_refract vector
+	Ro_refract[0] = Ron[0];
+	Ro_refract[1] = Ron[1];
+	Ro_refract[2] = Ron[2];
+	
+	// offsetting reflection vector
+	double reflect_offset[3] = {0, 0, 0};
+	reflect_offset[0] = reflection_vector[0] * .01;
+	reflect_offset[1] = reflection_vector[1] * .01;
+	reflect_offset[2] = reflection_vector[2] * .01;
+	Ro_reflect[0] = Ro_reflect[0] + reflect_offset[0];
+	Ro_reflect[1] = Ro_reflect[1] + reflect_offset[1];
+	Ro_reflect[2] = Ro_reflect[2] + reflect_offset[2];
+	//
+	
+	// offsetting refraction vector
+	double refract_offset[3] = {0, 0, 0};
+	refract_offset[0] = refraction_vector[0] * .01;
+	refract_offset[1] = refraction_vector[1] * .01;
+	refract_offset[2] = refraction_vector[2] * .01;
+	Ro_refract[0] = Ro_refract[0] + refract_offset[0];
+	Ro_refract[1] = Ro_refract[1] + refract_offset[1];
+	Ro_refract[2] = Ro_refract[2] + refract_offset[2];
+	//
+	
+	// Copying reflection vector over to Rd_reflect vector for normalization before use
+	Rd_reflect[0] = reflection_vector[0];
+	Rd_reflect[1] = reflection_vector[1];
+	Rd_reflect[2] = reflection_vector[2];
+	
+	// Copying refraction vector over to Rd_refract vector for normalization before use
+	Rd_refract[0] = refraction_vector[0];
+	Rd_refract[1] = refraction_vector[1];
+	Rd_refract[2] = refraction_vector[2];
 	
 	
-	if(best_reflect_o == -1 && best_refract_o == -1) // change this?
+	normalize(Rd_reflect); // normalize new reflection vector
+	normalize(Rd_refract); // normalize new refraction vector
+	
+	
+	// shoot out reflection vector with the new ray origin and the reflection vector as the new direction
+	double best_reflect_t = INFINITY;
+	int best_reflect_o = -1;
+	shoot(Ro_reflect, Rd_reflect, INFINITY, best_i, &best_reflect_t, &best_reflect_o);
+	
+	// shoot out refraction vector conditionally with the new ray origin and the refraction vector as the new direction
+	double best_refract_t = INFINITY;
+	int best_refract_o = -1;	
+	shoot(Ro_refract, Rd_refract, INFINITY, best_i, &best_refract_t, &best_refract_o); 
+	
+	// checks if there was either a reflection or refraction "interesection" found
+	if(best_reflect_o != -1 || best_refract_o != -1)
 	{
-		color[0] = 0;
-		color[1] = 0;
-		color[2] = 0;
-	}
-	
-	else // may need to adjust this if statement
-	{
+		// initializes color vectors intended to hold reflection/refraction colors if there was a corresponding "intersection"
 		double reflection_color[3] = {0, 0, 0};
 		double refraction_color[3] = {0, 0, 0};
-		double Rd_reflect[3] = {0, 0, 0};
-		double Rd_refract[3] = {0, 0, 0};
+		
+		// initializes the reflectivity/refractivity/reflect_ior/refract_ior constants
 		double reflectivity = 0;
 		double refractivity = 0;
-		double reflect_ior = 1; // put this in if statement eventually
+		double reflect_ior = 1; 
 		double refract_ior = 1;
 		
-		// maybe modularize this
+		// quick set of conditional statements to assign reflectivity/refractivity values from the best_i object index to the variables declared above
 		if(objects[best_i]->kind == 1)
 		{
 			reflectivity = objects[best_i]->sphere.reflectivity;
 			refractivity = objects[best_i]->sphere.refractivity;
-			//reflect_ior = objects[best_reflect_o]->sphere.ior; // best_reflect_o here because it's the ior of the object reflected off of?
 		}
 		if(objects[best_i]->kind == 2)
 		{
 			reflectivity = objects[best_i]->plane.reflectivity;
 			refractivity = objects[best_i]->plane.refractivity;
-			//reflect_ior = objects[best_reflect_o]->plane.ior;
 		}
 		
+		// checks to see if there was a reflection intersection based on value of returned object index (best_reflect_o); won't ever be 0 since 0 is the camera's index
+		if(best_reflect_o >= 1) 
+		{		
 		
-		if(best_reflect_o >= 1) // CHANGE THIS TO >= 0?
-		{
-		
-		
+			// after determining that there was a reflection intersection, we have the reflection index needed to calculate the index of refraction value from the intersected object
 			if(objects[best_reflect_o]->kind == 1)
 			{
 				reflect_ior = objects[best_reflect_o]->sphere.ior;
@@ -1434,82 +1376,65 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 			{
 				reflect_ior = objects[best_reflect_o]->plane.ior;
 			}
-			// end of pulling reflectivity/ior values
-			
-			/*
-			Rd_reflect[0] = (Rd[0] + best_r) * reflection_vector; // should it be Rd_reflect or Ro_r?
-			Rd_reflect[1] = (Rd[1] + best_r) * reflection_vector; // maybe add back and use as first param in shade call below
-			Rd_reflect[2] = (Rd[2] + best_r) * reflection_vector;*/
-			
-			//shade(reflection_vector, Ron, best_r, best_o, lights, depth + 1, reflection_color);
-			
-			//reflection_color[0] *= reflectivity;
-			//reflection_color[1] *= reflectivity;
-			//reflection_color[2] *= reflectivity;
+			// end of pulling ior values
 			
 			
-			/*//invert reflection vector?
-			reflection_vector[0] *= -1;
-			reflection_vector[1] *= -1;
-			reflection_vector[2] *= -1;*/
-			
-			// create reflection light object
+			// create reflection light object intended to store the color/direction values of the reflection to be used in conjunction with the direct_shade function
 			Object* reflection_light;
 			reflection_light = (Object*)malloc(sizeof(Object));
 			
-			reflection_light->light.kind_light = 2;
+			reflection_light->light.kind_light = 2; // a type of "flag" value to indicate that the light isn't a point/spotlight but rather a special "reflection/refraction light"
 			
+			// recursive call on the shade function using the previously calculated Ron along with the reflection vector as the new ray direction, in conjunction with the distance to the "reflect" object as well as its index. Also increments recursive depth level
+			shade(Ro_reflect, Rd_reflect, best_reflect_t, best_reflect_o, lights, reflect_ior, depth + 1, reflection_color);
 			
-			shade(Ron, reflection_vector, best_reflect_t, best_reflect_o, lights, reflect_ior, depth + 1, reflection_color);
-			
+			// scales the returned reflection_color vector (from the recursive call return) by the reflectivity property to account for the reflection_color vector
 			reflection_color[0] = reflection_color[0] * reflectivity;
 			reflection_color[1] = reflection_color[1] * reflectivity;
 			reflection_color[2] = reflection_color[2] * reflectivity;
+
 			
-			// testing color correctness
 			
-			/*color[0] += reflection_color[0];
-			color[1] += reflection_color[1];
-			color[2] += reflection_color[2];*/
-			
-			//
-			
+			// stores the previously allocated light object with the reflection vector inverted by -1 as the light's direction, and the reflection_volor vector as the light's color
 			reflection_light->light.direction[0] = reflection_vector[0] * -1;
-			reflection_light->light.direction[1] = reflection_vector[1] * -1; // rethink this?
+			reflection_light->light.direction[1] = reflection_vector[1] * -1; 
 			reflection_light->light.direction[2] = reflection_vector[2] * -1;
 			
 			reflection_light->light.color[0] = reflection_color[0];
 			reflection_light->light.color[1] = reflection_color[1];
 			reflection_light->light.color[2] = reflection_color[2];
-			
-			printf("Temp light direction is: [%lf %lf %lf]\n", reflection_light->light.direction[0], reflection_light->light.direction[1], reflection_light->light.direction[2]);
-			printf("Temp light color is: [%lf %lf %lf]\n", reflection_light->light.color[0], reflection_light->light.color[1], reflection_light->light.color[2]);
+			// end of filling light object
 			
 			
-			/////
+	
+			// modifies reflection vector by scaling it using the distance to the "reflect" object
+			Rd_reflect[0] = Rd_reflect[0] * best_reflect_t;
+			Rd_reflect[1] = Rd_reflect[1] * best_reflect_t;
+			Rd_reflect[2] = Rd_reflect[2] * best_reflect_t;
+					
 			
-			reflection_vector[0] = reflection_vector[0] * best_reflect_t;
-			reflection_vector[1] = reflection_vector[1] * best_reflect_t;
-			reflection_vector[2] = reflection_vector[2] * best_reflect_t;
+			// creates new Rd_reflect direction vector and stores the value Rd_reflect vector - the new ray origin vector to get the new direction of the reflected ray
+			double Rd_reflect_new[3] = {0, 0, 0}; // maybe set to Rdn instead
 			
-			Rd_reflect[0] = reflection_vector[0] - Ron[0];
-			Rd_reflect[1] = reflection_vector[1] - Ron[1]; // try changing to sub
-			Rd_reflect[2] = reflection_vector[2] - Ron[2];
+			Rd_reflect_new[0] = Rd_reflect[0] - Ron[0];
+			Rd_reflect_new[1] = Rd_reflect[1] - Ron[1]; 
+			Rd_reflect_new[2] = Rd_reflect[2] - Ron[2];
 			
 			
-			/*
-			Rd_reflect[0] = (Ron[0] + best_r) * reflection_vector[0]; 
-			Rd_reflect[1] = (Ron[1] + best_r) * reflection_vector[1];  // mess with this
-			Rd_reflect[2] = (Ron[2] + best_r) * reflection_vector[2];*/
+			// normalizes the newly calculated reflected ray's direction vector
+			normalize(Rd_reflect_new); 
 			
-			normalize(Rd_reflect); // toggle?
+			// calls the direct_shade function using the new ray origin vector along with the reflected ray's direction vector
+			direct_shade(Ron, Rd_reflect_new, Rd, -1, best_i, reflection_light, color); // pass in  -1 as distance_to_light because it won't be used since this is a reflection
 			
-			shade_object(Ron, Rd_reflect, Rd, INFINITY, best_i, reflection_light, color); // pass in INFINITY (change to -1?) as distance_to_light because it won't be used since this is a reflection
+			
+			free(reflection_light);
 		}
 		
 		if(best_refract_o >= 1)
 		{
 			
+			// after determining that there was a refraction intersection, we have the refraction index needed to calculate the index of refraction value from the intersected object
 			if(objects[best_refract_o]->kind == 1)
 			{
 				refract_ior = objects[best_refract_o]->sphere.ior;
@@ -1519,105 +1444,94 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 			{
 				refract_ior = objects[best_refract_o]->plane.ior;
 			}
+			// end of pulling ior values
 			
 			
-			refraction_vector[0] = refraction_vector[0] * .01;
-			refraction_vector[1] = refraction_vector[1] * .01; // change this constant?
-			refraction_vector[2] = refraction_vector[2] * .01;
-			
-			// create refraction light object
+			// create refraction light object intended to store the color/direction values of the refraction to be used in conjunction with the direct_shade function
 			Object* refraction_light;
 			refraction_light = (Object*)malloc(sizeof(Object));
 			
-			refraction_light->light.kind_light = 2;
-					
-			shade(Ron, refraction_vector, best_refract_t, best_refract_o, lights, refract_ior, depth + 1, refraction_color);
+			refraction_light->light.kind_light = 2; // a type of "flag" value to indicate that the light isn't a point/spotlight but rather a special "reflection/refraction light"
 			
+			// recursive call on the shade function using the previously calculated Ron along with the refraction vector as the new ray direction, in conjunction with the distance to the "refract" object as well as its index. Also increments recursive depth level
+			shade(Ro_refract, Rd_refract, best_refract_t, best_refract_o, lights, refract_ior, depth + 1, refraction_color);
+			
+			// scales the returned refraction vector (from the recursive call return) by the reflectivity property to account for the refraction_color vector
 			refraction_color[0] = refraction_color[0] * refractivity;
 			refraction_color[1] = refraction_color[1] * refractivity;
 			refraction_color[2] = refraction_color[2] * refractivity;
+		
 			
-			// testing color correctness
-			
-			/*color[0] += refraction_color[0];
-			color[1] += refraction_color[1];
-			color[2] += refraction_color[2];*/
-			
-			//
-			
+			// stores the previously allocated light object with the refraction vector inverted by -1 as the light's direction, and the refraction_vector vector as the light's color
 			refraction_light->light.direction[0] = refraction_vector[0] * -1;
-			refraction_light->light.direction[1] = refraction_vector[1] * -1; // rethink this?
+			refraction_light->light.direction[1] = refraction_vector[1] * -1; 
 			refraction_light->light.direction[2] = refraction_vector[2] * -1;
 			
 			refraction_light->light.color[0] = refraction_color[0];
 			refraction_light->light.color[1] = refraction_color[1];
 			refraction_light->light.color[2] = refraction_color[2];
+			// end of filling light object
 			
 			
-			/////
+			// modifies refraction vector by scaling it using the distance to the "refract" object
+			Rd_refract[0] = Rd_refract[0] * best_refract_t;
+			Rd_refract[1] = Rd_refract[1] * best_refract_t;
+			Rd_refract[2] = Rd_refract[2] * best_refract_t;
 			
-			refraction_vector[0] = refraction_vector[0] * best_refract_t;
-			refraction_vector[1] = refraction_vector[1] * best_refract_t;
-			refraction_vector[2] = refraction_vector[2] * best_refract_t;
+			// creates new Rd_refract direction vector and stores the value Rd_refract vector - the new ray origin vector to get the new direction of the refracted ray
+			double Rd_refract_new[3] = {0, 0, 0};
 			
-			Rd_refract[0] = refraction_vector[0] - Ron[0];
-			Rd_refract[1] = refraction_vector[1] - Ron[1]; // try changing to sub
-			Rd_refract[2] = refraction_vector[2] - Ron[2];
-			
-			
-			/*
-			Rd_reflect[0] = (Ron[0] + best_r) * reflection_vector[0]; 
-			Rd_reflect[1] = (Ron[1] + best_r) * reflection_vector[1];  // mess with this
-			Rd_reflect[2] = (Ron[2] + best_r) * reflection_vector[2];*/
-			
-			normalize(Rd_refract); // toggle?
-			
-			shade_object(Ron, Rd_refract, Rd, INFINITY, best_i, refraction_light, color); // pass in INFINITY (change to -1?) as distance_to_light because it won't be used since this is a refraction
+			Rd_refract_new[0] = Rd_refract[0] - Ron[0];
+			Rd_refract_new[1] = Rd_refract[1] - Ron[1]; 
+			Rd_refract_new[2] = Rd_refract[2] - Ron[2];
 			
 			
+			// normalizes the newly calculated refracted ray's direction vector
+			normalize(Rd_refract_new); 
+			
+
+			// calls the direct_shade function using the new ray origin vector along with the refracted ray's direction vector			
+			direct_shade(Ron, Rd_refract_new, Rd, -1, best_i, refraction_light, color); // pass in -1 as distance_to_light because it won't be used since this is a refraction
+			
+			
+			free(refraction_light);
 		}
 		
 		
+		// adding existing color of the object to newly calculated color vector			
+
+		double color_diff = 1.0 - reflectivity - refractivity;
+
+		double new_color[3] = {0, 0, 0};
 		
-		if(reflectivity == -1) // consider changing this
-			reflectivity = 0;
-		if(refractivity == -1)
-			refractivity = 0;
-			
-		if(fabs(reflectivity) <= 0 && fabs(refractivity) <= 0)
+		if(objects[best_i]->kind == 1)
 		{
-			color[0] = 0;
-			color[1] = 0;
-			color[2] = 0;
-		}
-		else
-		{
-			double color_diff = 1.0 - reflectivity - refractivity;
-			if(fabs(color_diff) <= 0)
-				color_diff = 0;
-			double new_color[3] = {0, 0, 0};
-			
-			if(objects[best_i]->kind == 1)
-			{
-				new_color[0] = objects[best_i]->sphere.diffuse_color[0] * color_diff;
-				new_color[1] = objects[best_i]->sphere.diffuse_color[1] * color_diff;
-				new_color[2] = objects[best_i]->sphere.diffuse_color[2] * color_diff;
-			}
-			
-			if(objects[best_i]->kind == 2)
-			{
-				new_color[0] = objects[best_i]->plane.diffuse_color[0] * color_diff;
-				new_color[1] = objects[best_i]->plane.diffuse_color[1] * color_diff;
-				new_color[2] = objects[best_i]->plane.diffuse_color[2] * color_diff;
-			}
-			
-			color[0] += new_color[0];
-			color[1] += new_color[1];
-			color[2] += new_color[2];
+			new_color[0] = objects[best_i]->sphere.diffuse_color[0] * color_diff;
+			new_color[1] = objects[best_i]->sphere.diffuse_color[1] * color_diff;
+			new_color[2] = objects[best_i]->sphere.diffuse_color[2] * color_diff;
 		}
 		
+		if(objects[best_i]->kind == 2)
+		{
+			new_color[0] = objects[best_i]->plane.diffuse_color[0] * color_diff;
+			new_color[1] = objects[best_i]->plane.diffuse_color[1] * color_diff;
+			new_color[2] = objects[best_i]->plane.diffuse_color[2] * color_diff;
+		}
+		
+		color[0] += new_color[0];
+		color[1] += new_color[1];
+		color[2] += new_color[2];
+			
 	}
-		
+	
+	// checks to see if there was neither a reflection/refraction "intersection" and sets the color to the background accordingly
+	if(best_reflect_o == -1 && best_refract_o == -1) 
+	{
+		color[0] += 0;
+		color[1] += 0;
+		color[2] += 0;
+	}
+	
 			
 	for(int j =  0; lights[j] != 0; j+=1) // new for loop which iterates for every light in the lights array
 	{							
@@ -1629,24 +1543,28 @@ void shade(double Ro[3], double Rd[3], double best_t, int best_i, Object** light
 		normalize(Rdn);				
 		
 		
-		double new_best_t; // creates new intersection t variable
-		int best_s; // initializes variable to act as indication of "closest shadow object"
+		// shoots ray to check if there's a "shadow object" using Ron and Rdn vector as well as the previously calculated distance_to_light value as the max distance for the ray
+		double new_best_t = INFINITY; 
+		int best_s = -1; 
 		shoot(Ron, Rdn, distance_to_light, best_i, &new_best_t, &best_s);
-	
-		// recursive shade call here? or restructure
 			
 		
 		if(best_s == -1) // no closest shadow was found since best_s was unmodified (would never be set to -1 otherwise)
-		{ 								
-			shade_object(Ron, Rdn, Rd, distance_to_light, best_i, lights[j], color);
+		{ 						
+			// since no shadow was found, direct_shade is called to color the point accordingly
+			direct_shade(Ron, Rdn, Rd, distance_to_light, best_i, lights[j], color);
 		}
 		
-		// else set color to 0, 0, 0 just in case?
-			
-		// add background color here or somewhere?
+		else // shadow was found so color black
+		{
+			color[0] += 0;
+			color[1] += 0;
+			color[2] += 0;
+		}
 	}
 }
 
+// encapsulates functionality for shooting a ray out into the scene and indirectly returning a distance to the intersected object as well as an index
 void shoot(double Ro[3], double Rd[3], double distance, int current_index, double* final_distance, int* final_index)
 {
 	double best_t = INFINITY;
@@ -1686,14 +1604,17 @@ void shoot(double Ro[3], double Rd[3], double distance, int current_index, doubl
 				best_i = i;
 			} 
 	}
-	*final_distance = best_t;
-	*final_index = best_i;
+	*final_distance = best_t; // returns distance to object through pointer 
+	*final_index = best_i; // returns intersected object index through pointer
 }
 
+
+// a function which calculates the reflected vector using a direction/position as well as an object index
 void reflect_vector(double* d, double* p, int index, double* output)
 {
 	double normal[3];
 	
+	// determining normal value
 	if(objects[index]->kind == 1)
 	{
 		normal[0] = p[0] - objects[index]->sphere.position[0];
@@ -1707,25 +1628,23 @@ void reflect_vector(double* d, double* p, int index, double* output)
 		normal[2] = objects[index]->plane.normal[2];
 	}
 	
+	// normalizes normal
 	normalize(normal);
 	
+	// reflectino process
 	double temp_scalar = 2 * ((normal[0]*d[0]) + (normal[1]*d[1]) + (normal[2]*d[2]));
 	double temp_vector[3];
 	temp_vector[0] = normal[0] * temp_scalar;
 	temp_vector[1] = normal[1] * temp_scalar;
 	temp_vector[2] = normal[2] * temp_scalar;
+	// end of reflection process
 	
-	// method 1
-	/*output[0] = temp_vector[0] - d[0];
-	output[1] = temp_vector[1] - d[1];
-	output[2] = temp_vector[2] - d[2];*/
-	
-	// method 2
 	output[0] = d[0] - temp_vector[0];
 	output[1] = d[1] - temp_vector[1];
 	output[2] = d[2] - temp_vector[2];
 }
 
+// a function which calculates the refracted vector using a direction/position and external index of refraction along with an object index
 void refract_vector(double* d, double* p, int external_ior, int index, double* output)
 {
 	double temp_d[3] = {0, 0, 0};
@@ -1780,17 +1699,17 @@ void refract_vector(double* d, double* p, int external_ior, int index, double* o
 	normalize(normal);
 	
 	// cross product to find coordinate frame 1
-	coord_1[0] = normal[1]*temp_d[2] - normal[2]*temp_d[1];
-	coord_1[1] = normal[2]*temp_d[0] - normal[0]*temp_d[2];
-	coord_1[2] = normal[0]*temp_d[1] - normal[1]*temp_d[0];
+	coord_1[0] = (normal[1]*temp_d[2]) - (normal[2]*temp_d[1]);
+	coord_1[1] = (normal[2]*temp_d[0]) - (normal[0]*temp_d[2]);
+	coord_1[2] = (normal[0]*temp_d[1]) - (normal[1]*temp_d[0]);
 	
+	// normalizes coordinate frame after calculating it
 	normalize(coord_1);
 	
-	coord_2[0] = coord_1[1]*normal[2] - coord_1[2]*normal[1];
-	coord_2[1] = coord_1[2]*normal[0] - coord_1[0]*normal[2];
-	coord_2[2] = coord_1[0]*normal[1] - coord_1[1]*normal[0];
+	coord_2[0] = (coord_1[1]*normal[2]) - (coord_1[2]*normal[1]);
+	coord_2[1] = (coord_1[2]*normal[0]) - (coord_1[0]*normal[2]);
+	coord_2[2] = (coord_1[0]*normal[1]) - (coord_1[1]*normal[0]);
 	
-	//normalize(coord_2);
 	
 	// determine transmission vector angle/direction
 	sin_angle = ((temp_d[0]*coord_2[0]) + (temp_d[1]*coord_2[1]) + (temp_d[2]*coord_2[2]));
@@ -1810,3 +1729,5 @@ void refract_vector(double* d, double* p, int external_ior, int index, double* o
 	output[2] = normal[2] + coord_2[2];
 	
 }
+
+
