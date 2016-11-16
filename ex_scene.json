@@ -1,0 +1,50 @@
+[
+  {"type": "camera",
+    "width": 0.5,
+    "height": 0.5
+  },	
+  {"type": "sphere",
+    "radius": 2.0,
+    "diffuse_color": [1, 0, 0],
+    "reflectivity": 1.0,
+    "refractivity": 0,
+    "specular_color": [1, 1, 1],
+    "position": [0, 1, 15],
+	"ior": 1.1
+  },
+  {"type": "sphere",
+    "radius": .3,
+    "diffuse_color": [0, 1, 0],
+    "specular_color": [1, 1, 1],
+    "position": [-0.2, -0.2, 10.5],
+    "reflectivity": 1.0,
+    "refractivity": 0,
+	"ior": 1.33
+  },
+  {"type": "sphere",
+    "radius": 0.9,
+    "diffuse_color": [0, 0, 1],
+    "specular_color": [1, 1, 1],
+    "position": [2.0, -0.1, 11],
+    "reflectivity": 0.0,
+    "refractivity": 0.8,
+    "ior": 1.5
+  },
+  {"type": "plane",
+    "normal": [0, 1, 0],
+    "diffuse_color": [0, 1, 0],
+    "specular_color": [1, 1, 1],
+    "position": [0, -1, 0],
+    "reflectivity": 1.0,
+    "refractivity": 0,
+	"ior": 1.7
+  },
+  {"type": "light",
+    "color": [1.5, 1.5, 1.5],
+    "theta": 0,
+    "radial-a2": 0.125,
+    "radial-a1": 0.125,
+    "radial-a0": 0.125,
+    "position": [1, 2, 8]
+  }
+]
